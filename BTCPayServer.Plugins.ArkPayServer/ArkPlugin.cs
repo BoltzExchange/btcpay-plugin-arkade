@@ -146,6 +146,20 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             options.Threshold = TimeSpan.FromDays(1));
         services.AddSingleton<IIntentScheduler, SimpleIntentScheduler>();
 
+        // Intent-generation cadence override. NArk's IntentGenerationService
+        // falls back to a 5-minute poll when PollInterval is unset; that
+        // default governs how quickly imported notes and near-expiry VTXOs
+        // turn into batch intents. Left unset here so production behaviour
+        // is unchanged — operators (and the e2e suite) can shorten it via
+        // BTCPAY_ARKINTENTPOLLSECONDS without a code change.
+        services.AddOptions<IntentGenerationServiceOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+            {
+                var seconds = configuration.GetValue<int?>("ARKINTENTPOLLSECONDS");
+                if (seconds is > 0)
+                    options.PollInterval = TimeSpan.FromSeconds(seconds.Value);
+            });
+
         // Wallet provider
         services.AddSingleton<NArk.Abstractions.Wallets.IWalletProvider, NArk.Core.Wallet.DefaultWalletProvider>();
 
@@ -165,12 +179,17 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // structured-log args) into a rolling file per wallet so the
         // merchant can download a wallet-scoped log when asking for
         // support. See Services/WalletLogger/.
+        // This factory must NOT resolve an ILogger<>. The companion
+        // ILoggerProvider registration below means IWalletLogStore is built
+        // while the host LoggerFactory is itself being constructed — pulling
+        // an ILogger<T> through DI here re-enters that half-built factory
+        // and hangs plugin startup.
         services.AddSingleton<IWalletLogStore>(sp =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
             var dataDir = new DataDirectories().Configure(configuration).DataDir;
             var logDir = Path.Combine(dataDir, "Plugins", "ArkPayServer", "wallet-logs");
-            return new RollingFileWalletLogStore(logDir, sp.GetService<ILogger<RollingFileWalletLogStore>>());
+            return new RollingFileWalletLogStore(logDir);
         });
         services.AddSingleton<ILoggerProvider>(sp =>
             new WalletScopedLoggerProvider(sp.GetRequiredService<IWalletLogStore>()));
