@@ -478,7 +478,7 @@ public class ArkController(
                     config!.WalletId!,
                     NextContractPurpose.Boarding,
                     ContractActivityState.AwaitingFundsBeforeDeactivate,
-                    metadata: new Dictionary<string, string> { ["Source"] = "manual-boarding" },
+                    metadata: new Dictionary<string, string> { ["Source"] = "manual" },
                     cancellationToken: cancellationToken);
                 model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
 
@@ -516,6 +516,7 @@ public class ArkController(
         var existingContracts = await contractStorage.GetContracts(
             walletIds: [walletId],
             isActive: true,
+            contractTypes: [ArkPaymentContract.ContractType],
             cancellationToken: cancellationToken);
 
         var manualContract = existingContracts
@@ -543,7 +544,7 @@ public class ArkController(
         var boardingEntity = existingContracts
             .FirstOrDefault(c =>
                 c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") == "manual-boarding");
+                c.Metadata?.GetValueOrDefault("Source") is "manual" or "manual-boarding");
 
         if (boardingEntity == null) return null;
 
@@ -2010,9 +2011,11 @@ public class ArkController(
 
         if (command == "save-boarding")
         {
-            var minAmount = model.MinBoardingAmountSats > 0 ? model.MinBoardingAmountSats : 330L;
-            if (minAmount < 330)
-                return RedirectWithError(nameof(StoreOverview), "Boarding minimum cannot be below the P2TR dust threshold (330 sats).", new { storeId });
+            var minAmount = model.MinBoardingAmountSats > 0
+                ? model.MinBoardingAmountSats
+                : ArkadePaymentMethodConfig.DefaultMinBoardingAmountSats;
+            if (minAmount < ArkadePaymentMethodConfig.P2trDustLimitSats)
+                return RedirectWithError(nameof(StoreOverview), $"Boarding minimum cannot be below the P2TR dust threshold ({ArkadePaymentMethodConfig.P2trDustLimitSats} sats).", new { storeId });
 
             var newConfig = config! with { BoardingEnabled = true, MinBoardingAmountSats = minAmount };
             store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
