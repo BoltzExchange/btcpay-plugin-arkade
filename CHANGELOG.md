@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.16] - 2026-05-22
+
+### Bug Fixes
+- **Unconfirmed boarding payments no longer shown as Spendable/Settled.** An in-mempool boarding UTXO (its on-chain funding tx not yet confirmed) was rendered as Spendable + Settled + Unspent across the VTXO table, the store-overview VTXO list, and the invoice "Arkade Payments" row — but arkd rejects unconfirmed boarding inputs at settle time, so it is neither spendable nor settleable. Now an "Unconfirmed" badge is shown and the Spendable/Settled badges are suppressed until the funding tx confirms (`Vtxos.cshtml`, `_VtxoTable.cshtml`, `ArkPaymentData.cshtml`). (#66)
+
+### SDK (NNark)
+- **Unconfirmed boarding UTXOs excluded from spendable coins.** `SpendingService.GetAvailableCoins` now filters out on-chain (boarding) VTXOs whose funding tx has not confirmed (`ArkVtxo.IsUnconfirmedOnchain()`), so an in-mempool boarding UTXO is no longer offered as a coin — arkd rejects unconfirmed boarding inputs at settle time, so any spend built from one is doomed (#101).
+- **VTXO detection can't desync from active contracts.** `VtxoSynchronizationService`'s 5-second safety-net poll now derives the active-script set fresh from the providers every tick (provider-agnostic) and reconciles the subscription stream, instead of trusting a cached view that was only refreshed on contract-change events. A lost or aborted refresh (e.g. during the rapid contract creation of a swap) used to silently leave a freshly-derived receive contract unwatched, so a payment to it went undetected until a manual sync. Per-provider failures are now isolated, and `EfCoreVtxoStorage.GetActiveScripts` projects `DISTINCT script` to keep the per-tick derive cheap at scale (#102).
+
 ## [2.1.15] - 2026-05-21
 
 ### Features
