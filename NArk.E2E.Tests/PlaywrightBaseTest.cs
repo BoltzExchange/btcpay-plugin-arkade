@@ -125,31 +125,31 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
 
     /// <summary>
     /// Creates a store and sets up its Arkade wallet through the plugin's
-    /// initial-setup wizard. Pass <c>null</c> to take the "Create a new wallet"
-    /// (HD) path; pass any non-null string (nsec, BIP-39 seed phrase, npub,
-    /// or existing wallet-id) to take the import path. Returns the storeId
-    /// once the wizard has redirected away from /initial-setup.
+    /// setup wizard. Pass <c>null</c> to take the "Create a new wallet" path;
+    /// pass any non-null string (nsec, BIP-39 seed phrase, npub, or existing
+    /// wallet-id) to take the import path. Returns the storeId once the wizard
+    /// has redirected away from /initial-setup.
     /// </summary>
     protected async Task<string> CreateStoreWithArkWalletAsync(string? walletInput = null)
     {
         ArgumentNullException.ThrowIfNull(Page);
         var storeId = await CreateStore();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
+        await GoToUrl($"/plugins/ark/stores/{storeId}/getting-started");
+        await Page.ClickAsync("[data-testid='getting-started-continue-btn']");
+        await Page.WaitForURLAsync(
+            url => url.Contains("/initial-setup"),
+            new PageWaitForURLOptions { Timeout = 30_000 });
 
         if (walletInput is null)
         {
-            // Submit the "new HD wallet" form programmatically. The button
-            // sits inside a Bootstrap collapse and Playwright's actionability
-            // checks race the animation — programmatic .click() on the
-            // submit button bypasses that without losing form behavior.
+            // The submit buttons sit inside Bootstrap collapses; DOM clicks
+            // avoid racing Playwright's actionability checks against the
+            // collapse animation while preserving normal form submission.
             await Page.EvaluateAsync(
                 "document.querySelector('[data-testid=\"create-wallet-btn\"]').click()");
         }
         else
         {
-            // The "import existing wallet" form has a required text input;
-            // setting .value directly bypasses HTML5 validation in the same
-            // way the user submitting the visible form does.
             await Page.EvaluateAsync(
                 "(v) => { var el = document.querySelector('[data-testid=\"nsec-input\"]'); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }",
                 walletInput);
@@ -173,9 +173,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         if (Page.Url.Contains("/recovery-seed-backup", StringComparison.Ordinal))
         {
             // BTCPay shows the new mnemonic for safekeeping and asks the
-            // user to tick a "I've written it down" box before continuing.
-            // Form action posts back to the ReturnUrl we set to
-            // /plugins/ark/stores/{storeId}/overview.
+            // user to tick an "I've written it down" box before continuing.
             await Page.CheckAsync("#confirm");
             await Page.ClickAsync("form#RecoveryConfirmation button#submit");
             await Page.WaitForURLAsync(
