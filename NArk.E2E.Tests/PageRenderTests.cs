@@ -23,9 +23,11 @@ public class PageRenderTests : PlaywrightBaseTest
 
     [Theory]
     [Trait("Category", "Integration")]
+    [InlineData("getting-started")]
     [InlineData("overview")]
     [InlineData("receive")]
     [InlineData("send")]
+    [InlineData("settings")]
     [InlineData("spend")]
     [InlineData("contracts")]
     [InlineData("swaps")]

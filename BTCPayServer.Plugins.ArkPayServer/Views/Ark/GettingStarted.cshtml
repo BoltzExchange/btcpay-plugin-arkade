@@ -1,0 +1,42 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@inject IScopeProvider ScopeProvider
+
+@{
+    Layout = "_LayoutWizard";
+    ViewData.SetActivePage(category: "Ark", activePage: "GettingStarted", title: "Arkade - Getting Started");
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+
+@section Navbar {
+    <a asp-controller="UIStores" asp-action="Dashboard" asp-route-storeId="@storeId" class="cancel">
+        <vc:icon symbol="cross" />
+    </a>
+}
+
+<header class="text-center">
+    <h1>How it works</h1>
+    <p class="lead text-secondary mt-3">Arkade lets this store accept Lightning payments without running a Lightning node.</p>
+    <p class="text-secondary mt-3 mb-0">
+        Want the protocol details?
+        <a href="https://docs.arkadeos.com/learn/background" target="_blank" rel="noreferrer noopener">Learn how Arkade works</a>.
+    </p>
+</header>
+
+<section class="mt-5">
+    <div class="list-group">
+        <div class="list-group-item">
+            <div class="image">
+                <vc:icon symbol="lightning" />
+            </div>
+            <div class="content">
+                <h4>Accept Lightning without channels</h4>
+                <p class="mb-0 text-secondary">BTCPay can create standard Lightning invoices. When a customer pays, the payment lands in your wallet automatically.</p>
+            </div>
+        </div>
+    </div>
+
+    <a asp-action="InitialSetup" asp-route-storeId="@storeId" class="btn btn-primary mt-4" data-testid="getting-started-continue-btn">
+        Continue
+    </a>
+</section>

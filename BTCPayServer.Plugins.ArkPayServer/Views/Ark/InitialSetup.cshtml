@@ -20,8 +20,8 @@
 }
 
 <header class="text-center">
-    <h1>Setup Your Arkade Wallet</h1>
-    <p class="lead text-secondary mt-3">Choose how you want to configure your Arkade wallet</p>
+    <h1>Set up Arkade</h1>
+    <p class="lead text-secondary mt-3">Choose how this store should receive payments.</p>
 </header>
 
 <div class="mt-5">
@@ -44,7 +44,7 @@
             <div class="card-body">
                 <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId" id="importExistingForm">
                     <div class="form-group mb-3">
-                        <label asp-for="Wallet" class="form-label">Wallet Configuration</label>
+                        <label asp-for="Wallet" class="form-label">Wallet settings</label>
                         <input asp-for="Wallet" class="form-control" placeholder="seed phrase / nsec... / npub... / wallet-id" id="existingWalletInput" required data-testid="nsec-input"/>
                         <span asp-validation-for="Wallet" class="text-danger"></span>
                         <div class="form-text mt-2">
@@ -87,7 +87,7 @@
                     <div class="alert alert-info">
                         <strong>Info:</strong> A new hot wallet will be generated automatically for you.
                     </div>
-                    <p>This will create a new Arkade wallet that is stored on your BTCPay Server. Make sure to back up your wallet after creation.</p>
+                    <p>This creates a new wallet for this store and stores it on your BTCPay Server. Make sure to back up your wallet after creation.</p>
                     <button name="command" type="submit" value="save" class="btn btn-primary" data-testid="create-wallet-btn">Create Wallet</button>
                 </form>
             </div>

@@ -18,9 +18,10 @@ public class WalletSetupTests : PlaywrightBaseTest
 
     /// <summary>
     /// Smoke test: register an admin, create a store, navigate to the
-    /// plugin's initial-setup page, and confirm both wallet-creation
-    /// options are rendered. Validates that the plugin DLL loaded and
-    /// the controller is wired up — no Ark-side state is exercised.
+    /// plugin's setup page, confirm the explanatory step is first, then
+    /// continue and confirm both wallet-creation options are rendered.
+    /// Validates that the plugin DLL loaded and the controller is wired up
+    /// — no Ark-side state is exercised.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
@@ -37,10 +38,19 @@ public class WalletSetupTests : PlaywrightBaseTest
         var storeId = await CreateStore();
 
         // Plugin controller routes are mounted under /plugins/ark/...
-        // The overview action redirects to initial-setup when no wallet
-        // is configured yet, so this single URL works for fresh stores.
+        // The overview action redirects to getting-started when no wallet
+        // is configured yet.
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         await Page!.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        Assert.Contains("/getting-started", Page.Url);
+        Assert.Equal(1, await Page.Locator("[data-testid='getting-started-continue-btn']").CountAsync());
+        Assert.Equal(0, await Page.Locator("[data-testid='hd-wallet-option']").CountAsync());
+
+        await Page.ClickAsync("[data-testid='getting-started-continue-btn']");
+        await Page.WaitForURLAsync(
+            url => url.Contains("/initial-setup"),
+            new PageWaitForURLOptions { Timeout = 30_000 });
 
         var hdOption = Page.Locator("[data-testid='hd-wallet-option']");
         var legacyOption = Page.Locator("[data-testid='legacy-wallet-option']");
