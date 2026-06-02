@@ -194,16 +194,16 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
             if (needsInit)
             {
                 // localhost:7070 = arkd gRPC inside its own container.
-                // chopsticks:3000 = the regtest esplora API endpoint reachable
-                // on the arkd container's docker network (NOT esplora:5000 —
-                // that's the web UI). Both match the values used by
-                // submodules/NNark/regtest/start-env.sh + DockerHelper.
+                // http://mempool_web/api = denigiri's Esplora-compatible REST
+                // API (mempool), reachable on the arkd container's docker
+                // network — the same endpoint denigiri's own `ark` client init
+                // and arkd's EsploraURL use (replaces nigiri's chopsticks:3000).
                 var initResult = await Cli.Wrap("docker")
                     .WithArguments(new[]
                     {
                         "exec", container, "ark", "init",
                         "--server-url", "http://localhost:7070",
-                        "--explorer", "http://chopsticks:3000",
+                        "--explorer", "http://mempool_web/api",
                         "--password", "secret"
                     })
                     .WithValidation(CommandResultValidation.None)
@@ -239,21 +239,24 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
                 ?? throw new InvalidOperationException("ark receive returned no boarding_address");
 
             // 1 BTC is plenty for a suite-worth of 5000-sat cheat sends.
-            var faucetResult = await Cli.Wrap("nigiri")
-                .WithArguments(new[] { "faucet", boardingAddr, "1" })
+            // denigiri's bitcoin container (btcpayserver image, BITCOIN_NETWORK=regtest,
+            // rpcuser=admin1/rpcpassword=123, single loaded wallet) replaces the old
+            // `nigiri faucet`/`nigiri rpc --generate`; drive bitcoin-cli directly.
+            var faucetResult = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "sendtoaddress", boardingAddr, "1" })
                 .WithValidation(CommandResultValidation.None)
                 .ExecuteBufferedAsync();
             if (!faucetResult.IsSuccess)
                 throw new InvalidOperationException(
-                    $"nigiri faucet {boardingAddr} failed: {faucetResult.StandardError.Trim()}");
+                    $"bitcoin-cli sendtoaddress {boardingAddr} failed: {faucetResult.StandardError.Trim()}");
 
-            var mineResult = await Cli.Wrap("nigiri")
-                .WithArguments(new[] { "rpc", "--generate", "6" })
+            var mineResult = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "6" })
                 .WithValidation(CommandResultValidation.None)
                 .ExecuteBufferedAsync();
             if (!mineResult.IsSuccess)
                 throw new InvalidOperationException(
-                    $"nigiri rpc --generate 6 failed: {mineResult.StandardError.Trim()}");
+                    $"bitcoin-cli -generate 6 failed: {mineResult.StandardError.Trim()}");
 
             // Retry settle to absorb the faucet/mine propagation race: when the
             // `nigiri faucet` TX hasn't reached bitcoind's mempool before we
@@ -279,8 +282,8 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
                         $"stdout={settleResult.StandardOutput.Trim()}");
 
                 await Task.Delay(TimeSpan.FromSeconds(2));
-                await Cli.Wrap("nigiri")
-                    .WithArguments(new[] { "rpc", "--generate", "1" })
+                await Cli.Wrap("docker")
+                    .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "1" })
                     .WithValidation(CommandResultValidation.None)
                     .ExecuteBufferedAsync();
             }
