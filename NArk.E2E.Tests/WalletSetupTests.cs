@@ -76,8 +76,33 @@ public class WalletSetupTests : PlaywrightBaseTest
 
         var storeId = await CreateStoreWithArkWalletAsync();
 
-        Assert.Contains($"/plugins/ark/stores/{storeId}", Page!.Url);
+        Assert.Contains($"/plugins/ark/stores/{storeId}/overview", Page!.Url);
         Assert.DoesNotContain("/initial-setup", Page.Url);
+        Assert.DoesNotContain("/recovery-seed-backup", Page.Url);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreateNewHotWallet_DoesNotForceSeedBackup()
+    {
+        _fixture.Initialize(this);
+        await InitializePlaywright(_fixture.ServerTester!);
+
+        await GoToUrl("/register");
+        await RegisterNewUser(isAdmin: true);
+
+        var storeId = await CreateStore();
+        await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
+
+        await Page!.EvaluateAsync(
+            "document.querySelector('[data-testid=\"create-wallet-btn\"]').click()");
+        await Page.WaitForURLAsync(
+            url => !url.Contains("/initial-setup"),
+            new PageWaitForURLOptions { Timeout = 60_000 });
+        await Page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        Assert.Contains($"/plugins/ark/stores/{storeId}/overview", Page.Url);
+        Assert.DoesNotContain("/recovery-seed-backup", Page.Url);
     }
 
     /// <summary>

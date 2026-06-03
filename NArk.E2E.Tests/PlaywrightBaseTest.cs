@@ -157,29 +157,12 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 "document.querySelector('[data-testid=\"import-wallet-btn\"]').click()");
         }
 
-        // The InitialSetup POST redirects somewhere away from /initial-setup
-        // on success. New HD wallets go through BTCPay's seed-backup screen
-        // first (RecoverySeedBackup) before landing on /overview; everything
-        // else (nsec / seed-phrase / npub / wallet-id) redirects straight
-        // to /overview.
-        //
         // Generous timeout because the first wallet creation in a session
         // involves arkd signer registration + a contract derive on a cold
         // gRPC connection (~20-30s on a fresh BTCPay process).
         await Page.WaitForURLAsync(
             url => !url.Contains("/initial-setup"),
             new PageWaitForURLOptions { Timeout = 60_000 });
-
-        if (Page.Url.Contains("/recovery-seed-backup", StringComparison.Ordinal))
-        {
-            // BTCPay shows the new mnemonic for safekeeping and asks the
-            // user to tick an "I've written it down" box before continuing.
-            await Page.CheckAsync("#confirm");
-            await Page.ClickAsync("form#RecoveryConfirmation button#submit");
-            await Page.WaitForURLAsync(
-                url => !url.Contains("/recovery-seed-backup"),
-                new PageWaitForURLOptions { Timeout = 30_000 });
-        }
 
         // Wait for the landing page (typically /overview) to be DOM-ready so
         // the next navigation isn't queued behind an in-flight load. The
