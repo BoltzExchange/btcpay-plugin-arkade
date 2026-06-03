@@ -7,7 +7,7 @@
 @using BTCPayServer.Services.Invoices
 @using BTCPayServer.Views.Stores
 @model BTCPayServer.Components.MainNav.MainNavViewModel
-@inject PaymentMethodHandlerDictionary HandlerDictionary 
+@inject PaymentMethodHandlerDictionary HandlerDictionary
 @{
     var config =
         Model.Store
@@ -20,7 +20,7 @@
 }
 
 <li class="nav-item">
-    <a asp-controller="Ark" asp-action="@(enabled ? "StoreOverview" : "InitialSetup")"
+    <a asp-controller="Ark" asp-action="@(enabled ? "StoreOverview" : "GettingStarted")"
        asp-route-storeId="@Model.Store.Id"
        class="nav-link @ViewData.ActivePageClass("Ark", nameof(StoreNavPages))"
        id="StoreNav-Ark">
@@ -30,24 +30,26 @@
 
     @if (ViewData.IsCategoryActive("Ark"))
     {
-        @if (!enabled) {
+        @if (!enabled)
+        {
             <li class="nav-item nav-item-sub">
-                <a id="StoreNav-InitialSetup"
-                class="nav-link @ViewData.ActivePageClass("InitialSetup", "Ark")"
-                asp-controller="Ark"
-                asp-action="InitialSetup"
-                asp-route-storeId="@Model.Store.Id"
-                ext-translate="true">Getting Started</a>
+                <a id="StoreNav-GettingStarted"
+                   class="nav-link @ViewData.ActivePageClass("GettingStarted", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="GettingStarted"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Getting Started</a>
             </li>
         }
-        else {
+        else
+        {
             <li class="nav-item nav-item-sub">
                 <a id="StoreNav-Overview"
-                class="nav-link @ViewData.ActivePageClass("StoreOverview", "Ark")"
-                asp-controller="Ark"
-                asp-action="StoreOverview"
-                asp-route-storeId="@Model.Store.Id"
-                ext-translate="true">Overview</a>
+                   class="nav-link @ViewData.ActivePageClass("StoreOverview", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="StoreOverview"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Overview</a>
             </li>
             <li class="nav-item nav-item-sub">
                 <a id="StoreNav-Send"
@@ -81,14 +83,22 @@
                    asp-route-storeId="@Model.Store.Id"
                    ext-translate="true">VTXOs</a>
             </li>
-             <li class="nav-item nav-item-sub">
+            <li class="nav-item nav-item-sub">
                 <a id="StoreNav-Intents"
-                    class="nav-link @ViewData.ActivePageClass("Intents", "Ark")"
-                    asp-controller="Ark"
-                    asp-action="Intents"
-                    asp-route-storeId="@Model.Store.Id"
-                    ext-translate="true">Intents</a>
-             </li>
+                   class="nav-link @ViewData.ActivePageClass("Intents", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="Intents"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Intents</a>
+            </li>
+            <li class="nav-item nav-item-sub">
+                <a id="StoreNav-Settings"
+                   class="nav-link @ViewData.ActivePageClass("Settings", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="Settings"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Settings</a>
+            </li>
         }
     }
 

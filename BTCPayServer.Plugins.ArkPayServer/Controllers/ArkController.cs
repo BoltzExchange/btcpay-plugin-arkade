@@ -96,6 +96,21 @@ public class ArkController(
     private static readonly TimeSpan PostOpVtxoPollBuffer = TimeSpan.FromMinutes(5);
     private static DateTimeOffset PostOpVtxoPollSince() => DateTimeOffset.UtcNow - PostOpVtxoPollBuffer;
 
+    [HttpGet("stores/{storeId}/getting-started")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public IActionResult GettingStarted(string storeId)
+    {
+        var store = HttpContext.GetStoreData();
+        if (store == null)
+            return NotFound();
+
+        var config = GetConfig<ArkadePaymentMethodConfig>(ArkadePlugin.ArkadePaymentMethodId, store);
+        if (config?.WalletId is null)
+            return View();
+
+        return RedirectToAction(nameof(StoreOverview), new { storeId });
+    }
+
     [HttpGet("stores/{storeId}/initial-setup")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public IActionResult InitialSetup(string storeId)
@@ -111,7 +126,7 @@ public class ArkController(
             return View(new InitialWalletSetupViewModel());
         }
 
-        return RedirectToAction("StoreOverview", new { storeId });
+        return RedirectToAction(nameof(StoreOverview), new { storeId });
     }
 
     [HttpPost("stores/{storeId}/initial-setup")]
@@ -472,6 +487,45 @@ public class ArkController(
         return File(stream, "text/plain; charset=utf-8", filename);
     }
 
+    [HttpGet("stores/{storeId}/configuration")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public IActionResult Configuration(string storeId)
+    {
+        return RedirectToAction(nameof(Settings), new { storeId });
+    }
+
+    [HttpGet("stores/{storeId}/settings")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public async Task<IActionResult> Settings(string storeId, CancellationToken cancellationToken)
+    {
+        var (_, config, errorResult) = await ValidateStoreAndConfig();
+        if (errorResult != null) return errorResult;
+
+        var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
+        var destination = wallet?.Destination;
+        var (boltzConnected, boltzError, _) = await GetBoltzConnectionStatusAsync(cancellationToken);
+        var canManagePrivateKeys = config.GeneratedByStore ||
+            (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
+
+        return View("Settings", new StoreSettingsViewModel
+        {
+            WalletType = wallet?.WalletType ?? WalletType.SingleKey,
+            CanManagePrivateKeys = canManagePrivateKeys,
+            IsLightningEnabled = IsArkadeLightningEnabled(),
+            IsDestinationSweepEnabled = destination is not null,
+            Form = new StoreSettingsFormModel
+            {
+                Destination = destination,
+                MinBoardingAmountSats = config.MinBoardingAmountSats
+            },
+            AllowSubDustAmounts = config.AllowSubDustAmounts,
+            BoardingEnabled = config.BoardingEnabled,
+            BoltzUrl = arkNetworkConfig.BoltzUri,
+            BoltzConnected = boltzConnected,
+            BoltzError = boltzError
+        });
+    }
+
     [HttpPost("stores/{storeId}/show-private-key")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> ShowPrivateKey(string storeId)
@@ -738,7 +792,7 @@ public class ArkController(
         catch (IncompleteArkadeSetupException e)
         {
             TempData[WellKnownTempData.ErrorMessage] = "Payment failed: incomplete arkade setup!";
-            return RedirectToAction(nameof(InitialSetup), new {storeId = store.Id});
+            return RedirectToAction(nameof(GettingStarted), new {storeId = store.Id});
         }
         catch (MalformedPaymentDestination e)
         {
@@ -977,7 +1031,7 @@ public class ArkController(
     public async Task<IActionResult> EstimateFees(string storeId, [FromBody] FeeEstimateRequest request, CancellationToken token)
     {
         var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
-        if (errorResult != null) return BadRequest("Invalid store configuration");
+        if (errorResult != null) return BadRequest("Invalid store settings");
 
         try
         {
@@ -1182,7 +1236,7 @@ public class ArkController(
         CancellationToken token)
     {
         var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
-        if (errorResult != null) return BadRequest("Invalid store configuration");
+        if (errorResult != null) return BadRequest("Invalid store settings");
 
         try
         {
@@ -2027,47 +2081,52 @@ public class ArkController(
 
     [HttpPost("stores/{storeId}/update-wallet-config")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> UpdateWalletConfig(string storeId, StoreOverviewViewModel model, string? command = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> UpdateWalletConfig(string storeId, StoreSettingsFormModel model, string? command = null, CancellationToken cancellationToken = default)
     {
         var (store, config, errorResult) = await ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
+        var storeData = store!;
+        var arkConfig = config!;
 
         if (command == "clear-destination")
         {
-            await UpdateWalletDestinationAsync(config!.WalletId!, null, cancellationToken);
-            return RedirectWithSuccess(nameof(StoreOverview), "Auto-sweep destination cleared.", new { storeId });
+            await UpdateWalletDestinationAsync(arkConfig.WalletId!, null, cancellationToken);
+            return RedirectWithSuccess(nameof(Settings), "Auto-sweep destination cleared.", new { storeId });
         }
 
-        if (command == "save" && !string.IsNullOrEmpty(model.Destination))
+        if (command == "save")
         {
-            if (config!.AllowSubDustAmounts)
-                return RedirectWithError(nameof(StoreOverview), "Cannot configure auto-sweep while sub-dust amounts are enabled. Disable sub-dust amounts first.", new { storeId });
+            if (string.IsNullOrWhiteSpace(model.Destination))
+                return RedirectWithError(nameof(Settings), "Enter an Arkade destination address.", new { storeId });
+
+            if (arkConfig.AllowSubDustAmounts)
+                return RedirectWithError(nameof(Settings), "Cannot configure auto-sweep while sub-dust amounts are enabled. Disable sub-dust amounts first.", new { storeId });
 
             try
             {
                 var serverInfo = await clientTransport.GetServerInfoAsync(cancellationToken);
                 WalletFactory.ValidateDestination(model.Destination, serverInfo);
-                await UpdateWalletDestinationAsync(config.WalletId!, model.Destination, cancellationToken);
-                return RedirectWithSuccess(nameof(StoreOverview), "Auto-sweep destination updated.", new { storeId });
+                await UpdateWalletDestinationAsync(arkConfig.WalletId!, model.Destination, cancellationToken);
+                return RedirectWithSuccess(nameof(Settings), "Auto-sweep destination updated.", new { storeId });
             }
             catch (Exception ex)
             {
-                return RedirectWithError(nameof(StoreOverview), $"Failed to update destination: {ex.Message}", new { storeId });
+                return RedirectWithError(nameof(Settings), $"Failed to update destination: {ex.Message}", new { storeId });
             }
         }
 
         if (command == "toggle-subdust")
         {
-            var toggleWallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
+            var toggleWallet = await walletStorage.GetWalletById(arkConfig.WalletId!, cancellationToken);
             var destination = toggleWallet?.Destination;
 
-            if (!config.AllowSubDustAmounts && !string.IsNullOrEmpty(destination))
-                return RedirectWithError(nameof(StoreOverview), "Cannot enable sub-dust amounts while auto-sweep is configured. Clear the auto-sweep destination first.", new { storeId });
+            if (!arkConfig.AllowSubDustAmounts && !string.IsNullOrEmpty(destination))
+                return RedirectWithError(nameof(Settings), "Cannot enable sub-dust amounts while auto-sweep is configured. Clear the auto-sweep destination first.", new { storeId });
 
-            var newConfig = config with { AllowSubDustAmounts = !config.AllowSubDustAmounts };
-            store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
-            await storeRepository.UpdateStore(store);
-            return RedirectWithSuccess(nameof(StoreOverview),
+            var newConfig = arkConfig with { AllowSubDustAmounts = !arkConfig.AllowSubDustAmounts };
+            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
+            await storeRepository.UpdateStore(storeData);
+            return RedirectWithSuccess(nameof(Settings),
                 newConfig.AllowSubDustAmounts ? "Sub-dust amounts enabled for Arkade payments." : "Sub-dust amounts disabled for Arkade payments.",
                 new { storeId });
         }
@@ -2078,23 +2137,23 @@ public class ArkController(
                 ? model.MinBoardingAmountSats
                 : ArkadePaymentMethodConfig.DefaultMinBoardingAmountSats;
             if (minAmount < ArkadePaymentMethodConfig.P2trDustLimitSats)
-                return RedirectWithError(nameof(StoreOverview), $"Boarding minimum cannot be below the P2TR dust threshold ({ArkadePaymentMethodConfig.P2trDustLimitSats} sats).", new { storeId });
+                return RedirectWithError(nameof(Settings), $"Boarding minimum cannot be below the P2TR dust threshold ({ArkadePaymentMethodConfig.P2trDustLimitSats} sats).", new { storeId });
 
-            var newConfig = config! with { BoardingEnabled = true, MinBoardingAmountSats = minAmount };
-            store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
-            await storeRepository.UpdateStore(store);
-            return RedirectWithSuccess(nameof(StoreOverview), $"Boarding enabled with minimum {minAmount} sats.", new { storeId });
+            var newConfig = arkConfig with { BoardingEnabled = true, MinBoardingAmountSats = minAmount };
+            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
+            await storeRepository.UpdateStore(storeData);
+            return RedirectWithSuccess(nameof(Settings), $"Boarding enabled with minimum {minAmount} sats.", new { storeId });
         }
 
         if (command == "disable-boarding")
         {
-            var newConfig = config! with { BoardingEnabled = false };
-            store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
-            await storeRepository.UpdateStore(store);
-            return RedirectWithSuccess(nameof(StoreOverview), "Boarding disabled.", new { storeId });
+            var newConfig = arkConfig with { BoardingEnabled = false };
+            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
+            await storeRepository.UpdateStore(storeData);
+            return RedirectWithSuccess(nameof(Settings), "Boarding disabled.", new { storeId });
         }
 
-        return RedirectToAction(nameof(StoreOverview), new { storeId });
+        return RedirectToAction(nameof(Settings), new { storeId });
     }
 
     [HttpGet("stores/{storeId}/contracts")]
@@ -2513,7 +2572,7 @@ public class ArkController(
         blob.OnChainWithLnInvoiceFallback = true;
         store.SetStoreBlob(blob);
         await storeRepository.UpdateStore(store);
-        return RedirectWithSuccess(nameof(StoreOverview), "Lightning enabled", new { storeId });
+        return RedirectWithSuccess(nameof(Settings), "Lightning enabled", new { storeId });
     }
 
     [HttpPost("stores/{storeId}/disable-ln")]
@@ -2525,7 +2584,7 @@ public class ArkController(
 
         store!.SetPaymentMethodConfig(GetLightningPaymentMethod(), null);
         await storeRepository.UpdateStore(store);
-        return RedirectWithSuccess(nameof(StoreOverview), "Lightning disabled", new { storeId });
+        return RedirectWithSuccess(nameof(Settings), "Lightning disabled", new { storeId });
     }
 
     [HttpPost("stores/{storeId}/clear-wallet")]
@@ -2553,7 +2612,7 @@ public class ArkController(
             await walletStorage.DeleteWallet(walletId, HttpContext.RequestAborted);
         }
 
-        return RedirectWithSuccess(nameof(InitialSetup), "Arkade wallet configuration cleared.", new { storeId });
+        return RedirectWithSuccess(nameof(GettingStarted), "Arkade wallet settings cleared.", new { storeId });
     }
 
     [HttpPost("stores/{storeId}/force-refresh")]
@@ -3161,7 +3220,7 @@ public class ArkController(
 
         var config = GetConfig<ArkadePaymentMethodConfig>(ArkadePlugin.ArkadePaymentMethodId, store);
         if (config?.WalletId is null)
-            return (null, null, RedirectToAction(nameof(InitialSetup), new { storeId = store.Id }));
+            return (null, null, RedirectToAction(nameof(GettingStarted), new { storeId = store.Id }));
 
         if (requireOwnedByStore && !config.GeneratedByStore)
         {
@@ -4285,4 +4344,3 @@ public class ArkController(
 
     #endregion
 }
-
