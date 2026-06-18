@@ -56,24 +56,12 @@
     {
         <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 py-3 border-bottom">
             <div>
-                <div class="fw-semibold">Seed backup</div>
-                <div class="text-muted small">Controls backup reminders after this store receives funds.</div>
+                <div class="fw-semibold">Recovery seed</div>
+                <div class="text-muted small">View this wallet's recovery seed.</div>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2">
-                <span class="badge @(Model.WalletBackedUp ? "text-bg-success" : "text-bg-warning")" data-testid="wallet-backup-status">
-                    @(Model.WalletBackedUp ? "Backed up" : "Not backed up")
-                </span>
                 <form method="post" asp-controller="Ark" asp-action="ShowPrivateKey" asp-route-storeId="@storeId" asp-route-returnTo="settings">
                     <button type="submit" class="btn btn-outline-secondary">Show seed</button>
-                </form>
-                <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId">
-                    <button type="submit"
-                            name="command"
-                            value="@(Model.WalletBackedUp ? "mark-wallet-not-backed-up" : "mark-wallet-backed-up")"
-                            class="btn @(Model.WalletBackedUp ? "btn-outline-secondary" : "btn-primary")"
-                            data-testid="wallet-backup-toggle-btn">
-                        @(Model.WalletBackedUp ? "Mark not backed up" : "Mark as backed up")
-                    </button>
                 </form>
             </div>
         </div>

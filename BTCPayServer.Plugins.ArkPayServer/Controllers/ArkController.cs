@@ -565,7 +565,6 @@ public class ArkController(
             },
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
-            WalletBackedUp = config.WalletBackedUp ?? true,
             BoltzUrl = arkNetworkConfig.BoltzUri,
             BoltzConnected = boltzConnected,
             BoltzError = boltzError
@@ -2140,17 +2139,14 @@ public class ArkController(
         var storeData = store!;
         var arkConfig = config!;
 
-        if (command is "mark-wallet-backed-up" or "mark-wallet-not-backed-up")
+        if (command == "mark-wallet-backed-up")
         {
-            var walletBackedUp = command == "mark-wallet-backed-up";
-            var newConfig = arkConfig with { WalletBackedUp = walletBackedUp };
+            var newConfig = arkConfig with { WalletBackedUp = true };
             storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
             await storeRepository.UpdateStore(storeData);
 
             var returnAction = returnTo == "overview" ? nameof(StoreOverview) : nameof(Settings);
-            return RedirectWithSuccess(returnAction,
-                walletBackedUp ? "Wallet marked as backed up." : "Wallet marked as not backed up.",
-                new { storeId });
+            return RedirectWithSuccess(returnAction, "Wallet marked as backed up.", new { storeId });
         }
 
         if (command == "clear-destination")
