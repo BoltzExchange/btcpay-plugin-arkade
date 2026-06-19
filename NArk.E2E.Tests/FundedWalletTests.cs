@@ -36,19 +36,15 @@ public class FundedWalletTests : PlaywrightBaseTest
     public async Task FundedWallet_FullJourney_FundEstimateSendPayout()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
-        var walletId = await GetStoreWalletIdAsync(storeId);
-        Assert.False(string.IsNullOrEmpty(walletId), "store has no wallet id");
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
 
         // Fund with two notes so a single redemption batch yields two
         // independent VTXOs — the send and the payout each take one
         // without an inter-step change-settle wait.
-        await FundWalletViaNoteAsync(walletId!, 250_000);
-        await FundWalletViaNoteAsync(walletId!, 250_000);
+        var walletId = await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 250_000);
+        await FundWalletViaNoteAsync(_fixture.ServerTester!, walletId, 250_000);
 
         // Wait on the real readiness signal — spendable coins, not the
         // rendered balance (which counts a note VTXO before it's
@@ -58,7 +54,7 @@ public class FundedWalletTests : PlaywrightBaseTest
         Assert.NotEmpty(outpoints);
 
         // Recipient store — just to harvest a valid Arkade address.
-        var recipientStoreId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var recipientStoreId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{recipientStoreId}/overview");
         var recipientAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
         Assert.False(string.IsNullOrWhiteSpace(recipientAddr));
@@ -154,7 +150,4 @@ public class FundedWalletTests : PlaywrightBaseTest
         Assert.Fail($"payout never advanced past AwaitingApproval (last: {last})");
     }
 
-    private Task FundWalletViaNoteAsync(string walletId, long amountSats) =>
-        FundWalletViaNoteAsync(
-            _fixture.ServerTester!.PayTester.ServiceProvider, walletId, amountSats);
 }

@@ -31,11 +31,9 @@ public class PayoutTests : PlaywrightBaseTest
     public async Task CreatePullPayment_WithArkadeMethod_Succeeds()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
 
         var pp = await client.CreatePullPayment(storeId, new CreatePullPaymentRequest
@@ -58,14 +56,12 @@ public class PayoutTests : PlaywrightBaseTest
     public async Task ClaimPayout_ToArkAddress_AwaitingApproval()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
 
         // Harvest a real Arkade address from a second store.
-        var recipientStoreId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var recipientStoreId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{recipientStoreId}/overview");
         var recipientAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
 

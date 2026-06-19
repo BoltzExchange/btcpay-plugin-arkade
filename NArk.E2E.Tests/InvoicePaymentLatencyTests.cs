@@ -66,11 +66,9 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
     public async Task CheatModePay_DirectArkTx_InvoiceSettlesWithinThreshold()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
 
         // Funding the in-arkd ark CLI requires one batch round (~10s).
         // Deliberately do this BEFORE the timing window — we want to

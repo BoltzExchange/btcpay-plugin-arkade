@@ -37,13 +37,10 @@ public class SwapsTests : PlaywrightBaseTest
     public async Task PayLightningInvoice_CreatesSubmarineSwap()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
-        var walletId = await GetStoreWalletIdAsync(storeId);
-        await FundWalletViaNoteAsync(walletId!, 200_000);
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var walletId = await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 200_000);
 
         // BOLT11 on the nigiri "lnd" node Boltz can route to.
         var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 600);
@@ -95,7 +92,4 @@ public class SwapsTests : PlaywrightBaseTest
         Assert.Fail("no Submarine swap was recorded for the wallet after the LN spend");
     }
 
-    private Task FundWalletViaNoteAsync(string walletId, long amountSats) =>
-        FundWalletViaNoteAsync(
-            _fixture.ServerTester!.PayTester.ServiceProvider, walletId, amountSats);
 }
