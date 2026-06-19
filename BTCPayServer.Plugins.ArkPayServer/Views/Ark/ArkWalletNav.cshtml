@@ -52,6 +52,14 @@
                    ext-translate="true">Overview</a>
             </li>
             <li class="nav-item nav-item-sub">
+                <a id="StoreNav-Receive"
+                   class="nav-link @ViewData.ActivePageClass("Receive", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="Receive"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Receive</a>
+            </li>
+            <li class="nav-item nav-item-sub">
                 <a id="StoreNav-Send"
                    class="nav-link @ViewData.ActivePageClass("Send", "Ark")"
                    asp-controller="Ark"
@@ -60,12 +68,12 @@
                    ext-translate="true">Send</a>
             </li>
             <li class="nav-item nav-item-sub">
-                <a id="StoreNav-Contracts"
-                   class="nav-link @ViewData.ActivePageClass("Contracts", "Ark")"
+                <a id="StoreNav-Settings"
+                   class="nav-link @ViewData.ActivePageClass("Settings", "Ark")"
                    asp-controller="Ark"
-                   asp-action="Contracts"
+                   asp-action="Settings"
                    asp-route-storeId="@Model.Store.Id"
-                   ext-translate="true">Contracts</a>
+                   ext-translate="true">Settings</a>
             </li>
             <li class="nav-item nav-item-sub">
                 <a id="StoreNav-Swaps"
@@ -90,14 +98,6 @@
                    asp-action="Intents"
                    asp-route-storeId="@Model.Store.Id"
                    ext-translate="true">Intents</a>
-            </li>
-            <li class="nav-item nav-item-sub">
-                <a id="StoreNav-Settings"
-                   class="nav-link @ViewData.ActivePageClass("Settings", "Ark")"
-                   asp-controller="Ark"
-                   asp-action="Settings"
-                   asp-route-storeId="@Model.Store.Id"
-                   ext-translate="true">Settings</a>
             </li>
         }
     }

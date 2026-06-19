@@ -1,13 +1,14 @@
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
-/// <summary>
-/// View model for the Arkade dashboard widget.
-/// </summary>
 public class ArkDashboardWidgetViewModel
 {
     public required string StoreId { get; set; }
-    public string? WalletId { get; set; }
-    public bool HasWallet { get; set; }
-    public ArkBalancesViewModel? Balances { get; set; }
-    public int ActiveContractsCount { get; set; }
+    public required ArkDashboardPaymentIssue Issue { get; set; }
+}
+
+public enum ArkDashboardPaymentIssue
+{
+    Arkade,
+    Lightning,
+    ArkadeAndLightning
 }

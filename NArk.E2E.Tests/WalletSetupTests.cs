@@ -30,10 +30,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         var server = _fixture.ServerTester!;
 
-        await InitializePlaywright(server);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(server);
 
         var storeId = await CreateStore();
 
@@ -69,15 +66,49 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task CreateNewHotWallet_LandsOnOverview()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var storeId = await CreateStoreWithArkWalletAsync();
 
-        Assert.Contains($"/plugins/ark/stores/{storeId}", Page!.Url);
+        Assert.Contains($"/plugins/ark/stores/{storeId}/overview", Page!.Url);
         Assert.DoesNotContain("/initial-setup", Page.Url);
+        Assert.DoesNotContain("/recovery-seed-backup", Page.Url);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreateNewHotWallet_DefersSeedBackupReminderUntilFundsArrive()
+    {
+        _fixture.Initialize(this);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
+
+        var storeId = await CreateStoreWithArkWalletAsync();
+
+        Assert.Contains($"/plugins/ark/stores/{storeId}/overview", Page!.Url);
+        Assert.DoesNotContain("/recovery-seed-backup", Page.Url);
+        Assert.Equal(0, await Page.Locator("[data-testid='wallet-backup-warning']").CountAsync());
+
+        await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 50_000);
+        await WaitForVisibleSelectorAsync(
+            $"/plugins/ark/stores/{storeId}/overview",
+            "[data-testid='wallet-backup-warning']",
+            TimeSpan.FromMinutes(3));
+
+        var backupWarning = Page.Locator("[data-testid='wallet-backup-warning']");
+        Assert.Equal(1, await backupWarning.CountAsync());
+        Assert.Equal(1, await Page.Locator("[data-testid='backup-show-seed-btn']").CountAsync());
+        Assert.Equal(1, await Page.Locator("[data-testid='backup-mark-done-btn']").CountAsync());
+
+        await Page.ClickAsync("[data-testid='backup-mark-done-btn']");
+        await Page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        Assert.Equal(0, await Page.Locator("[data-testid='wallet-backup-warning']").CountAsync());
+
+        await GoToUrl($"/plugins/ark/stores/{storeId}/settings");
+        var settingsBody = await Page.InnerTextAsync("body");
+        Assert.Contains("Recovery seed", settingsBody);
+        Assert.Contains("Show seed", settingsBody);
+        Assert.DoesNotContain("not backed up", settingsBody, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -89,10 +120,7 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task ImportNsec_StoresWallet()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var nsec = GenerateRandomNsec();
         var storeId = await CreateStoreWithArkWalletAsync(nsec);
@@ -110,10 +138,7 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task ImportBip39SeedPhrase_StoresHdWallet()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
         var storeId = await CreateStoreWithArkWalletAsync(mnemonic);
@@ -132,10 +157,7 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task InvalidWalletInput_ShowsValidationError()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var storeId = await CreateStore();
         await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
@@ -168,15 +190,12 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task ImportNpub_CreatesTransitoryWallet()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         // Donor store: nsec (SingleKey) wallet so the overview exposes a
         // deterministic Arkade address. HD wallets don't render a default
         // address on /overview — they derive per-receive instead.
-        var donorStoreId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var donorStoreId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{donorStoreId}/overview");
         var donorAddress = await Page!.InputValueAsync("[data-testid='receive-address']");
         Assert.False(string.IsNullOrWhiteSpace(donorAddress), "donor store has no receive address");
@@ -198,10 +217,7 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task ImportWalletId_ReusesExistingWallet()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var storeAId = await CreateStoreWithArkWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{storeAId}/overview");
@@ -228,10 +244,7 @@ public class WalletSetupTests : PlaywrightBaseTest
     public async Task WalletLogDownload_ReturnsFile()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var storeId = await CreateStoreWithArkWalletAsync();
 

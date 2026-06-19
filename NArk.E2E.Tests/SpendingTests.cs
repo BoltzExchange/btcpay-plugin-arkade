@@ -31,12 +31,10 @@ public class SpendingTests : PlaywrightBaseTest
     public async Task BuildIntent_NoCoinsSelected_ShowsError()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
-        var recipientStoreId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var recipientStoreId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{recipientStoreId}/overview");
         var recipientAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
 
@@ -74,11 +72,9 @@ public class SpendingTests : PlaywrightBaseTest
     public async Task SuggestCoins_EmptyWallet_ReturnsNoCoinsError()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
 

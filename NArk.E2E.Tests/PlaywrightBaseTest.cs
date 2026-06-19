@@ -66,6 +66,13 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         TestLogs.LogInformation($"Playwright: Browsing to {ServerUri}");
     }
 
+    protected async Task InitializePlaywrightAndRegisterAdminAsync(ServerTester serverTester)
+    {
+        await InitializePlaywright(serverTester);
+        await GoToUrl("/register");
+        await RegisterNewUser(isAdmin: true);
+    }
+
     protected async Task GoToUrl(string relativeUrl)
     {
         ArgumentNullException.ThrowIfNull(Page);
@@ -157,29 +164,12 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 "document.querySelector('[data-testid=\"import-wallet-btn\"]').click()");
         }
 
-        // The InitialSetup POST redirects somewhere away from /initial-setup
-        // on success. New HD wallets go through BTCPay's seed-backup screen
-        // first (RecoverySeedBackup) before landing on /overview; everything
-        // else (nsec / seed-phrase / npub / wallet-id) redirects straight
-        // to /overview.
-        //
         // Generous timeout because the first wallet creation in a session
         // involves arkd signer registration + a contract derive on a cold
         // gRPC connection (~20-30s on a fresh BTCPay process).
         await Page.WaitForURLAsync(
             url => !url.Contains("/initial-setup"),
             new PageWaitForURLOptions { Timeout = 60_000 });
-
-        if (Page.Url.Contains("/recovery-seed-backup", StringComparison.Ordinal))
-        {
-            // BTCPay shows the new mnemonic for safekeeping and asks the
-            // user to tick an "I've written it down" box before continuing.
-            await Page.CheckAsync("#confirm");
-            await Page.ClickAsync("form#RecoveryConfirmation button#submit");
-            await Page.WaitForURLAsync(
-                url => !url.Contains("/recovery-seed-backup"),
-                new PageWaitForURLOptions { Timeout = 30_000 });
-        }
 
         // Wait for the landing page (typically /overview) to be DOM-ready so
         // the next navigation isn't queued behind an in-flight load. The
@@ -190,6 +180,9 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
 
         return storeId;
     }
+
+    protected Task<string> CreateStoreWithSingleKeyWalletAsync() =>
+        CreateStoreWithArkWalletAsync(GenerateRandomNsec());
 
     private static string? _resolvedArkdContainer;
 
@@ -304,6 +297,20 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         await contractService.ImportContract(walletId, ArkNoteContract.Parse(note));
     }
 
+    protected Task FundWalletViaNoteAsync(
+        ServerTester serverTester, string walletId, long amountSats) =>
+        FundWalletViaNoteAsync(serverTester.PayTester.ServiceProvider, walletId, amountSats);
+
+    protected async Task<string> FundStoreWalletViaNoteAsync(
+        ServerTester serverTester, string storeId, long amountSats)
+    {
+        var walletId = await GetStoreWalletIdAsync(storeId);
+        if (string.IsNullOrWhiteSpace(walletId))
+            throw new InvalidOperationException($"Store {storeId} has no wallet id.");
+        await FundWalletViaNoteAsync(serverTester, walletId, amountSats);
+        return walletId;
+    }
+
     /// <summary>
     /// Reads [data-testid='wallet-balance'] from the current overview
     /// page. The plugin renders available balance as a BTC-denominated
@@ -344,6 +351,27 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         }
         throw new TimeoutException(
             $"Wallet {storeId} balance never reached {minSats} sats (last: {last}).");
+    }
+
+    /// <summary>
+    /// Reloads a plugin page until a selector is rendered and visible.
+    /// Use this for UI states driven by async wallet/indexer work where a
+    /// balance threshold would couple the test to unrelated fee mechanics.
+    /// </summary>
+    protected async Task WaitForVisibleSelectorAsync(
+        string relativeUrl, string selector, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(Page);
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromMinutes(3));
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await GoToUrl(relativeUrl);
+            var locator = Page.Locator(selector).First;
+            if (await locator.CountAsync() > 0 && await locator.IsVisibleAsync())
+                return;
+            await Task.Delay(3_000);
+        }
+        throw new TimeoutException($"Selector {selector} was not visible on {relativeUrl}.");
     }
 
     /// <summary>

@@ -49,8 +49,6 @@ using NBitcoin;
 using NBitcoin.DataEncoders;
 using NBitcoin.Scripting;
 using NBitcoin.Secp256k1;
-using ArkIntent = NArk.Abstractions.Intents.ArkIntent;
-
 namespace BTCPayServer.Plugins.ArkPayServer.Controllers;
 
 [Route("plugins/ark")]
@@ -65,10 +63,12 @@ public class ArkController(
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
     IClientTransport clientTransport,
     ArkOperatorHealthService arkOperatorHealth,
+    BoltzHealthService boltzHealth,
     ArkadeSpendingService arkadeSpendingService,
     ArkAutomatedPayoutSenderFactory payoutSenderFactory,
     PayoutProcessorService payoutProcessorService,
     PullPaymentHostedService pullPaymentHostedService,
+    InvoiceRepository invoiceRepository,
     EventAggregator eventAggregator,
     IIntentGenerationService intentGenerationService,
     IIntentStorage intentStorage,
@@ -196,7 +196,10 @@ public class ArkController(
             // pending txs, resync funds, then sync boarding UTXOs.
             StartBackgroundRecovery(walletSettings.WalletId!);
 
-            var config = new ArkadePaymentMethodConfig(walletSettings.WalletId!, walletSettings.IsOwnedByStore);
+            var config = new ArkadePaymentMethodConfig(
+                walletSettings.WalletId!,
+                walletSettings.IsOwnedByStore,
+                WalletBackedUp: !walletSettings.IsNewlyGeneratedWallet);
             store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], config);
 
             // Set Arkade as the default payment method
@@ -232,19 +235,6 @@ public class ArkController(
             }
 
             await storeRepository.UpdateStore(store);
-
-            // If a new HD wallet was generated, redirect to seed backup page
-            if (walletSettings is { IsNewlyGeneratedWallet: true, Wallet: not null })
-            {
-                return this.RedirectToRecoverySeedBackup(new RecoverySeedBackupViewModel
-                {
-                    ReturnUrl = Url.Action(nameof(StoreOverview), new { storeId }),
-                    IsStored = true,
-                    RequireConfirm = true,
-                    CryptoCode = "ARK",
-                    Mnemonic = walletSettings.Wallet
-                });
-            }
 
             TempData[WellKnownTempData.SuccessMessage] = "Arkade payment method updated.";
 
@@ -353,9 +343,7 @@ public class ArkController(
             defaultAddress = defaultContract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
         }
 
-        // Check Ark Operator connection
-        var (arkOperatorConnected, arkOperatorError) = await CheckServiceConnectionAsync(
-            ct => clientTransport.GetServerInfoAsync(ct), cancellationToken);
+        var arkOperatorStatus = await arkOperatorHealth.GetStatusAsync(cancellationToken);
 
         // Check Boltz connection and get cached limits
         var (boltzConnected, boltzError, boltzLimits) = await GetBoltzConnectionStatusAsync(cancellationToken);
@@ -365,66 +353,117 @@ public class ArkController(
         var canManagePrivateKeys = config!.GeneratedByStore ||
             (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
 
-        // Get recent VTXOs for the overview (latest 5, including spent)
-        IReadOnlyCollection<ArkVtxo> recentVtxos = [];
-        HashSet<OutPoint> spendableOutpoints = [];
-        Dictionary<string, ArkContractEntity> vtxoContracts = new();
+        var recentPayments = new List<RecentPaymentViewModel>();
+        var receivedVolumeSats = 0L;
+        var processingPaymentCount = 0;
+        var lightningPaymentMethod = GetLightningPaymentMethod();
+        var lnurlPaymentMethod = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
+        var paymentMethods = new HashSet<PaymentMethodId>
+        {
+            ArkadePlugin.ArkadePaymentMethodId,
+            lightningPaymentMethod,
+            lnurlPaymentMethod
+        };
+
+        try
+        {
+            var invoices = await invoiceRepository.GetInvoices(new InvoiceQuery
+            {
+                StoreId = [store!.Id],
+                IncludeArchived = false,
+                Take = 25
+            }, cancellationToken);
+
+            foreach (var payment in invoices
+                         .SelectMany(i => i.GetPayments(false))
+                         .Where(p => paymentMethods.Contains(p.PaymentMethodId)))
+            {
+                if (payment.Status is PaymentStatus.Settled or PaymentStatus.Processing)
+                {
+                    receivedVolumeSats += Money.Coins(payment.Value).Satoshi;
+                }
+
+                if (payment.Status == PaymentStatus.Processing)
+                {
+                    processingPaymentCount++;
+                }
+
+                var isLightningPayment = payment.PaymentMethodId == lightningPaymentMethod ||
+                                         payment.PaymentMethodId == lnurlPaymentMethod;
+
+                recentPayments.Add(new RecentPaymentViewModel
+                {
+                    Date = payment.ReceivedTime,
+                    Title = "Payment received",
+                    Description = isLightningPayment ? "Lightning" : "Bitcoin",
+                    Amount = payment.Value,
+                    Currency = payment.Currency,
+                    PaymentStatus = payment.Status
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to load recent invoice payments for store {StoreId}", store!.Id);
+        }
+
         var totalVtxoCount = 0;
         try
         {
-            var allCoins = await arkadeSpender.GetAvailableCoins(config.WalletId!, cancellationToken);
-            spendableOutpoints = allCoins.Select(c => c.Outpoint).ToHashSet();
-
             var vtxos = await vtxoStorage.GetVtxos(
                 walletIds: [config.WalletId!],
                 includeSpent: true,
-                take: 5,
                 cancellationToken: cancellationToken);
-            recentVtxos = vtxos.ToList();
-
-            // Get total count (all VTXOs including spent)
-            var allVtxos = await vtxoStorage.GetVtxos(
-                walletIds: [config.WalletId!],
-                includeSpent: true,
-                cancellationToken: cancellationToken);
-            totalVtxoCount = allVtxos.Count();
-
-            // Get contract info for VTXOs
-            var vtxoScripts = recentVtxos.Select(v => v.Script).Distinct().ToArray();
-            var contracts = await contractStorage.GetContracts(
-                walletIds: [config.WalletId!],
-                scripts: vtxoScripts,
-                cancellationToken: cancellationToken);
-            vtxoContracts = contracts.ToDictionary(c => c.Script);
+            totalVtxoCount = vtxos.Count;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Silently ignore - VTXOs section will show empty
+            logger.LogDebug(ex, "Failed to load VTXO count for wallet {WalletId}", config.WalletId);
         }
 
-        // Get recent intents (latest 5)
-        IReadOnlyCollection<ArkIntent> recentIntents = [];
+        var totalIntentCount = 0;
+        var totalSwapCount = 0;
+        var pendingLightningSwapCount = 0;
         try
         {
-            recentIntents = await intentStorage.GetIntents(
-                walletIds:[config.WalletId!], skip: 0, take: 5, states: [ArkIntentState.BatchInProgress, ArkIntentState.BatchSucceeded, ArkIntentState.WaitingForBatch, ArkIntentState.WaitingToSubmit], cancellationToken: cancellationToken);
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            totalIntentCount = await db.Intents.CountAsync(i => i.WalletId == config.WalletId!, cancellationToken);
+            totalSwapCount = await db.Swaps.CountAsync(s => s.WalletId == config.WalletId!, cancellationToken);
+
+            var lightningSwapTypes = new[] { ArkSwapType.ReverseSubmarine, ArkSwapType.Submarine };
+            var lightningSwaps = db.Swaps
+                .Where(s => s.WalletId == config.WalletId! && lightningSwapTypes.Contains(s.SwapType));
+
+            pendingLightningSwapCount = await lightningSwaps
+                .CountAsync(s => s.Status == ArkSwapStatus.Pending || s.Status == ArkSwapStatus.Unknown, cancellationToken);
+
+            var visibleLightningSwaps = await lightningSwaps
+                .Where(s => s.SwapType == ArkSwapType.ReverseSubmarine &&
+                            (s.Status == ArkSwapStatus.Pending ||
+                             s.Status == ArkSwapStatus.Unknown))
+                .OrderByDescending(s => s.UpdatedAt)
+                .Take(5)
+                .ToListAsync(cancellationToken);
+            foreach (var swap in visibleLightningSwaps)
+            {
+                recentPayments.Add(new RecentPaymentViewModel
+                {
+                    Date = swap.UpdatedAt,
+                    Title = "Receiving payment",
+                    Description = "Lightning",
+                    Amount = Money.Satoshis(swap.ExpectedAmount).ToDecimal(MoneyUnit.BTC),
+                    Currency = "BTC",
+                    SwapStatus = swap.Status
+                });
+            }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Silently ignore - intents section will show empty
+            logger.LogDebug(ex, "Failed to load activity counts for wallet {WalletId}", config.WalletId);
         }
 
-        // Get recent swaps (latest 5)
-        IReadOnlyCollection<NArk.Swaps.Models.ArkSwap> recentSwaps = [];
-        try
-        {
-            recentSwaps = await swapStorage.GetSwaps(
-                walletIds: [config.WalletId!], take: 5, status: [ArkSwapStatus.Pending , ArkSwapStatus.Settled], cancellationToken: cancellationToken);
-        }
-        catch (Exception)
-        {
-            // Silently ignore - swaps section will show empty
-        }
+        var recentPaymentCount = recentPayments.Count;
+        recentPayments = [.. recentPayments.OrderByDescending(p => p.Date).Take(5)];
 
         return View(new StoreOverviewViewModel
         {
@@ -439,13 +478,15 @@ public class ArkController(
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
             MinBoardingAmountSats = config.MinBoardingAmountSats,
+            WalletBackedUp = config.WalletBackedUp ?? true,
+            HasReceivedFunds = receivedVolumeSats > 0 || totalVtxoCount > 0,
             Wallet = wallet?.Secret,
             WalletType = wallet?.WalletType ?? WalletType.SingleKey,
             CanManagePrivateKeys = canManagePrivateKeys,
             RecoveryStatus = config.WalletId is { } recoveryWalletId ? recoveryStatusTracker.Get(recoveryWalletId) : null,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
-            ArkOperatorConnected = arkOperatorConnected,
-            ArkOperatorError = ArkOperatorAvailability.DescribeMessage(arkOperatorError),
+            ArkOperatorConnected = arkOperatorStatus.Available,
+            ArkOperatorError = arkOperatorStatus.Error,
             BoltzUrl = arkNetworkConfig.BoltzUri,
             BoltzConnected = boltzConnected,
             BoltzError = boltzError,
@@ -457,12 +498,16 @@ public class ArkController(
             BoltzSubmarineMaxAmount = boltzLimits?.SubmarineMaxAmount,
             BoltzSubmarineFeePercentage = boltzLimits?.SubmarineFeePercentage,
             BoltzSubmarineMinerFee = boltzLimits?.SubmarineMinerFee,
-            RecentVtxos = recentVtxos,
-            SpendableOutpoints = spendableOutpoints,
-            VtxoContracts = vtxoContracts,
             TotalVtxoCount = totalVtxoCount,
-            RecentIntents = recentIntents,
-            RecentSwaps = recentSwaps
+            TotalIntentCount = totalIntentCount,
+            TotalSwapCount = totalSwapCount,
+            PaymentStats =
+            [
+                new() { Name = "Recent volume", Value = receivedVolumeSats, Unit = StoreOverviewStatUnit.Sats },
+                new() { Name = "Recent payments", Value = recentPaymentCount },
+                new() { Name = "In progress", Value = processingPaymentCount + pendingLightningSwapCount }
+            ],
+            RecentPayments = recentPayments
         });
     }
 
@@ -528,18 +573,24 @@ public class ArkController(
 
     [HttpPost("stores/{storeId}/show-private-key")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> ShowPrivateKey(string storeId)
+    public async Task<IActionResult> ShowPrivateKey(string storeId, string? returnTo = null)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (_, config, errorResult) = await ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var wallet = await walletStorage.GetWalletById(config!.WalletId);
         if (wallet?.Secret == null)
             return NotFound();
 
+        var canManagePrivateKeys = config.GeneratedByStore ||
+            (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
+        if (!canManagePrivateKeys)
+            return Forbid();
+
+        var returnAction = returnTo == "settings" ? nameof(Settings) : nameof(StoreOverview);
         return this.RedirectToRecoverySeedBackup(new RecoverySeedBackupViewModel
         {
-            ReturnUrl = Url.Action(nameof(StoreOverview), new { storeId }),
+            ReturnUrl = Url.Action(returnAction, new { storeId }),
             IsStored = true,
             RequireConfirm = false,
             CryptoCode = "ARK",
@@ -2081,12 +2132,22 @@ public class ArkController(
 
     [HttpPost("stores/{storeId}/update-wallet-config")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> UpdateWalletConfig(string storeId, StoreSettingsFormModel model, string? command = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> UpdateWalletConfig(string storeId, StoreSettingsFormModel model, string? command = null, string? returnTo = null, CancellationToken cancellationToken = default)
     {
         var (store, config, errorResult) = await ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
         var storeData = store!;
         var arkConfig = config!;
+
+        if (command == "mark-wallet-backed-up")
+        {
+            var newConfig = arkConfig with { WalletBackedUp = true };
+            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
+            await storeRepository.UpdateStore(storeData);
+
+            var returnAction = returnTo == "overview" ? nameof(StoreOverview) : nameof(Settings);
+            return RedirectWithSuccess(returnAction, "Wallet marked as backed up.", new { storeId });
+        }
 
         if (command == "clear-destination")
         {
@@ -3309,6 +3370,13 @@ public class ArkController(
     private async Task<(bool connected, string? error, BoltzAllLimits? limits)> GetBoltzConnectionStatusAsync(
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(arkNetworkConfig.BoltzUri))
+            return (false, null, null);
+
+        var status = await boltzHealth.GetStatusAsync(cancellationToken);
+        if (!status.Available)
+            return (false, status.Error, null);
+
         if (boltzLimitsValidator == null)
             return (false, null, null);
 
@@ -3319,7 +3387,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return (false, ex.Message, null);
+            logger.LogDebug(ex, "Failed to fetch Boltz limits");
+            return (false, BoltzHealthService.UnavailableMessage, null);
         }
     }
 

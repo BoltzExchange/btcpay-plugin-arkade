@@ -52,6 +52,21 @@
         </div>
     }
 
+    @if (Model.WalletType == WalletType.HD && Model.CanManagePrivateKeys)
+    {
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 py-3 border-bottom">
+            <div>
+                <div class="fw-semibold">Recovery seed</div>
+                <div class="text-muted small">View this wallet's recovery seed.</div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <form method="post" asp-controller="Ark" asp-action="ShowPrivateKey" asp-route-storeId="@storeId" asp-route-returnTo="settings">
+                    <button type="submit" class="btn btn-outline-secondary">Show seed</button>
+                </form>
+            </div>
+        </div>
+    }
+
     <div class="py-3 border-bottom">
         <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
             <div>

@@ -292,6 +292,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // Tracks Arkade-operator reachability so plugin pages can show a friendly
         // "operator unavailable" banner instead of leaking raw gRPC/HTTP errors.
         services.AddSingleton<ArkOperatorHealthService>();
+        services.AddSingleton<BoltzHealthService>();
 
         services.AddSingleton<ISweepPolicy, DestinationSweepPolicy>();
 
@@ -320,7 +321,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddUIExtension("store-wallets-nav", "/Views/Ark/ArkWalletNav.cshtml");
         services.AddUIExtension("ln-payment-method-setup-tab", "/Views/Lightning/LNPaymentMethodSetupTab.cshtml");
         services.AddUIExtension("dashboard", "/Views/Ark/ArkDashboardWidget.cshtml");
-        services.AddUIExtension("dashboard", "/Views/Ark/ArkActivityDashboardWidget.cshtml");
     }
 
     private static void RegisterBoltzServices(IServiceCollection services, ArkNetworkConfig networkConfig)

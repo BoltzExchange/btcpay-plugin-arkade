@@ -32,12 +32,10 @@ public class ApiEndpointTests : PlaywrightBaseTest
     public async Task ParseDestination_IdentifiesArkAddress()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         // Donor store with a deterministic Arkade address.
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var arkAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
         Assert.False(string.IsNullOrWhiteSpace(arkAddr));
@@ -72,11 +70,9 @@ public class ApiEndpointTests : PlaywrightBaseTest
     public async Task ParseDestination_IdentifiesLightningInvoice()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
 
         var bolt11 = await NArk.Tests.End2End.Common.DockerHelper.CreateLndInvoice(
             amtSats: 1_000, expirySecs: 300);
@@ -112,11 +108,9 @@ public class ApiEndpointTests : PlaywrightBaseTest
     public async Task ParseDestination_RejectsBareBitcoinAddress()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
 
         var key = new Key();
         var btcAddr = key.GetAddress(ScriptPubKeyType.TaprootBIP86, Network.RegTest).ToString();
@@ -148,11 +142,9 @@ public class ApiEndpointTests : PlaywrightBaseTest
     public async Task ParseDestination_RejectsInvalidDestination()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        var storeId = await CreateStoreWithSingleKeyWalletAsync();
 
         var resp = await Page!.Context.APIRequest.PostAsync(
             new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,
@@ -189,9 +181,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
     public async Task ShowPrivateKey_RevealsWalletSecret()
     {
         _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var nsec = GenerateRandomNsec();
         var storeId = await CreateStoreWithArkWalletAsync(nsec);

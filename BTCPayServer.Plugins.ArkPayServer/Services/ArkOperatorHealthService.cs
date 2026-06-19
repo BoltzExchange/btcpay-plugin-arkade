@@ -1,7 +1,8 @@
 using System;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using NArk.Core.Transport;
+using NArk.Hosting;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Services;
 
@@ -13,19 +14,9 @@ public sealed record ArkOperatorStatus(bool Available, string? Error);
 /// <summary>
 /// Singleton that tracks whether the Arkade operator (arkd) is reachable, so plugin pages
 /// can show a persistent "operator unavailable" banner without each page paying the cost of
-/// a fresh probe. A successful <see cref="IClientTransport.GetServerInfoAsync"/> is the
-/// liveness signal.
-/// <para>
-/// The result is cached for <see cref="CacheTtl"/>. We deliberately cache the RESULT, not a
-/// <see cref="Task"/> — a cached faulted task would pin the "down" state forever after a
-/// single transient hiccup. Because the underlying transport caches a successful
-/// server-info for ~5 minutes, a freshly-downed operator can still probe "up" during that
-/// window; real plugin operations therefore feed their observed outcome in via
-/// <see cref="ReportFailure"/>/<see cref="ReportSuccess"/> so the banner flips immediately on
-/// a failed action instead of waiting for the transport cache to expire.
-/// </para>
+/// a fresh probe.
 /// </summary>
-public sealed class ArkOperatorHealthService(IClientTransport clientTransport)
+public sealed class ArkOperatorHealthService(IHttpClientFactory httpClientFactory, ArkNetworkConfig arkNetworkConfig)
 {
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(15);
     private readonly SemaphoreSlim _probeGate = new(1, 1);
@@ -51,20 +42,26 @@ public sealed class ArkOperatorHealthService(IClientTransport clientTransport)
 
             try
             {
-                await clientTransport.GetServerInfoAsync(cancellationToken);
-                return Store(new ArkOperatorStatus(true, null));
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(3));
+
+                var infoUri = new Uri(new Uri(arkNetworkConfig.ArkUri.TrimEnd('/') + "/"), "v1/info");
+                using var request = new HttpRequestMessage(HttpMethod.Get, infoUri);
+                using var response = await httpClientFactory.CreateClient().SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    timeout.Token);
+
+                return Store(response.IsSuccessStatusCode
+                    ? new ArkOperatorStatus(true, null)
+                    : new ArkOperatorStatus(false, ArkOperatorAvailability.UnavailableMessage));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // The caller (e.g. the browser) aborted the request — that is not an
-                // operator signal, so don't poison the cache with a false "down". Surface
-                // the last-known status, defaulting to available when we have none.
                 return _cached ?? new ArkOperatorStatus(true, null);
             }
             catch
             {
-                // Any other failure means the operator did not answer the probe (gRPC
-                // transport fault, HTTP 5xx, the transport's own 10s fetch timeout, …).
                 return Store(new ArkOperatorStatus(false, ArkOperatorAvailability.UnavailableMessage));
             }
         }
