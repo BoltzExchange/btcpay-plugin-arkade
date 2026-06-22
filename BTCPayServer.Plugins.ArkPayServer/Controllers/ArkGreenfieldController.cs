@@ -109,7 +109,6 @@ public class ArkGreenfieldController(
             SignerAvailable = signerAvailable,
             IsOwnedByStore = config.GeneratedByStore,
             DefaultAddress = defaultAddress,
-            Destination = wallet?.Destination,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
             MinBoardingAmountSats = config.MinBoardingAmountSats,
@@ -136,7 +135,7 @@ public class ArkGreenfieldController(
         try
         {
             var (walletInfo, walletId, isNew, mnemonic) = await ResolveWalletInput(
-                request.Wallet, request.Destination, cancellationToken);
+                request.Wallet, cancellationToken);
 
             if (walletInfo != null)
             {
@@ -213,36 +212,9 @@ public class ArkGreenfieldController(
 
         var newConfig = config!;
 
-        // Handle destination update
-        if (request.Destination != null)
-        {
-            if (request.Destination == "")
-            {
-                // Clear destination
-                await walletStorage.UpdateDestination(config.WalletId, null, cancellationToken);
-            }
-            else
-            {
-                if (config.AllowSubDustAmounts)
-                    return this.CreateAPIError("invalid-settings",
-                        "Cannot set auto-sweep destination while sub-dust amounts are enabled.");
-
-                var serverInfo = await clientTransport.GetServerInfoAsync(cancellationToken);
-                WalletFactory.ValidateDestination(request.Destination, serverInfo);
-                await walletStorage.UpdateDestination(config.WalletId, request.Destination, cancellationToken);
-            }
-        }
-
         // Handle sub-dust toggle
         if (request.AllowSubDustAmounts is { } allowSubDust)
         {
-            if (allowSubDust)
-            {
-                var wallet = await walletStorage.GetWalletById(config.WalletId, cancellationToken);
-                if (!string.IsNullOrEmpty(wallet?.Destination))
-                    return this.CreateAPIError("invalid-settings",
-                        "Cannot enable sub-dust amounts while auto-sweep destination is configured.");
-            }
             newConfig = newConfig with { AllowSubDustAmounts = allowSubDust };
         }
 
@@ -1337,7 +1309,7 @@ public class ArkGreenfieldController(
     /// Returns: (walletInfo if new wallet needs creating, walletId, isNewlyGenerated, mnemonic if generated).
     /// </summary>
     private async Task<(ArkWalletInfo? WalletInfo, string? WalletId, bool IsNew, string? Mnemonic)> ResolveWalletInput(
-        string? wallet, string? destination, CancellationToken cancellationToken)
+        string? wallet, CancellationToken cancellationToken)
     {
         var serverInfo = await clientTransport.GetServerInfoAsync(cancellationToken);
 
@@ -1346,7 +1318,7 @@ public class ArkGreenfieldController(
         {
             var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve);
             var mnemonicStr = mnemonic.ToString();
-            var walletInfo = await WalletFactory.CreateWallet(mnemonicStr, destination, serverInfo, cancellationToken);
+            var walletInfo = await WalletFactory.CreateWallet(mnemonicStr, destination: null, serverInfo, cancellationToken);
             return (walletInfo, walletInfo.Id, true, mnemonicStr);
         }
 
@@ -1363,7 +1335,7 @@ public class ArkGreenfieldController(
                     return (null, candidateId, false, null);
             }
 
-            var walletInfo = await WalletFactory.CreateWallet(wallet, destination, serverInfo, cancellationToken);
+            var walletInfo = await WalletFactory.CreateWallet(wallet, destination: null, serverInfo, cancellationToken);
             return (walletInfo, walletInfo.Id, true, null);
         }
 
@@ -1375,7 +1347,7 @@ public class ArkGreenfieldController(
             {
                 var mnemonic = new Mnemonic(wallet.Trim(), Wordlist.English);
                 var walletInfo = await WalletFactory.CreateWallet(
-                    mnemonic.ToString(), destination, serverInfo, cancellationToken);
+                    mnemonic.ToString(), destination: null, serverInfo, cancellationToken);
                 return (walletInfo, walletInfo.Id, true, null);
             }
             catch
@@ -1384,26 +1356,13 @@ public class ArkGreenfieldController(
             }
         }
 
-        // Ark address → generate wallet with destination
-        if (ArkAddress.TryParse(wallet, out var addr))
-        {
-            var serverKey = serverInfo.SignerKey.Extract().XOnlyPubKey;
-            if (!serverKey.ToBytes().SequenceEqual(addr!.ServerKey.ToBytes()))
-                throw new InvalidOperationException("Ark address server key does not match the connected operator.");
-
-            var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve);
-            var mnemonicStr = mnemonic.ToString();
-            var walletInfo = await WalletFactory.CreateWallet(mnemonicStr, wallet, serverInfo, cancellationToken);
-            return (walletInfo, walletInfo.Id, true, mnemonicStr);
-        }
-
         // Existing wallet ID
         var existingWallet = await walletStorage.GetWalletById(wallet, cancellationToken);
         if (existingWallet != null)
             return (null, wallet, false, null);
 
         throw new InvalidOperationException(
-            "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words), nsec key, Ark address, or existing wallet ID.");
+            "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words), nsec key, or existing wallet ID.");
     }
 
     private bool ConfigureLightning(StoreData store, string walletId)

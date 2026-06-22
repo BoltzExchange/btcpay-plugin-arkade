@@ -14,6 +14,7 @@ public class ArkPluginMigrationRunner(
     {
         public bool InitialSetup { get; set; }
         public bool NNArkMigration { get; set; }
+        public bool LegacyWalletDestinationsCleared { get; set; }
     }
 
     public async Task ExecuteAsync(CancellationToken cancellationToken = default)
@@ -52,6 +53,21 @@ public class ArkPluginMigrationRunner(
             settings.NNArkMigration = true;
             await settingsRepository.UpdateSetting(settings);
             logger.LogInformation("Migrated {Count} wallets", result);
+        }
+        if (!settings.LegacyWalletDestinationsCleared)
+        {
+            var wallets = await ctx.Wallets
+                .Where(wallet => wallet.WalletDestination != null)
+                .ToListAsync(cancellationToken);
+            foreach (var wallet in wallets)
+            {
+                wallet.WalletDestination = null;
+            }
+            var result = await ctx.SaveChangesAsync(cancellationToken);
+
+            settings.LegacyWalletDestinationsCleared = true;
+            await settingsRepository.UpdateSetting(settings);
+            logger.LogInformation("Cleared {Count} legacy Arkade wallet destination(s)", result);
         }
     }
 }

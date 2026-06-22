@@ -5,7 +5,6 @@ using NArk.Storage.EfCore.Entities;
 public class ArkStoreWalletViewModel
 {
     public string? WalletId { get; set; }
-    public string? Destination { get; set; }
 
     public bool SignerAvailable { get; set; }
     public Dictionary<ArkWalletContractEntity, VtxoEntity[]>? Contracts { get; set; }

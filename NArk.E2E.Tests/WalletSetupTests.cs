@@ -180,14 +180,11 @@ public class WalletSetupTests : PlaywrightBaseTest
     }
 
     /// <summary>
-    /// Pass another store's wallet receive address as the import value.
-    /// The controller treats this as the destination for a transitory
-    /// auto-sweep wallet (npub path) and creates a fresh local wallet
-    /// that sweeps to the donor address.
+    /// Arkade addresses are payment destinations, not wallet setup inputs.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task ImportNpub_CreatesTransitoryWallet()
+    public async Task ImportArkadeAddress_IsRejected()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -200,11 +197,17 @@ public class WalletSetupTests : PlaywrightBaseTest
         var donorAddress = await Page!.InputValueAsync("[data-testid='receive-address']");
         Assert.False(string.IsNullOrWhiteSpace(donorAddress), "donor store has no receive address");
 
-        // New store: import the donor address as the transitory destination.
-        var transitoryStoreId = await CreateStoreWithArkWalletAsync(donorAddress);
+        var storeId = await CreateStore();
+        await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
 
-        Assert.NotEqual(donorStoreId, transitoryStoreId);
-        Assert.DoesNotContain("/initial-setup", Page.Url);
+        await Page.ClickAsync("[data-testid='legacy-wallet-option']");
+        await Page.FillAsync("[data-testid='nsec-input']", donorAddress);
+        await Page.ClickAsync("[data-testid='import-wallet-btn']");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        Assert.Contains("/initial-setup", Page.Url);
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.Contains("Unsupported", bodyText, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -23,7 +23,6 @@
                     <th text-translate="true">Type</th>
                     <th text-translate="true">Contracts</th>
                     <th text-translate="true">Swaps</th>
-                    <th text-translate="true">Destination</th>
                     <th></th>
                 </tr>
             </thead>
@@ -62,16 +61,6 @@
                             else
                             {
                                 <span class="badge text-bg-light text-muted fw-normal">0</span>
-                            }
-                        </td>
-                        <td>
-                            @if (wallet.WalletDestination != null)
-                            {
-                                <vc:truncate-center text="@wallet.WalletDestination" classes="truncate-center-id"/>
-                            }
-                            else
-                            {
-                                <span class="text-muted">None</span>
                             }
                         </td>
                         <td class="text-end">

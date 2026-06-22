@@ -10,16 +10,9 @@ public class ArkWalletSetupRequest
     /// - null/empty: generates a new 12-word BIP-39 mnemonic
     /// - nsec private key: imports as single-key wallet
     /// - 12 or 24 word BIP-39 mnemonic: imports as HD wallet
-    /// - Ark address: generates a new wallet and sets it as the destination
     /// - Existing wallet ID: links the wallet to this store (no new wallet created)
     /// </summary>
     public string? Wallet { get; set; }
-
-    /// <summary>
-    /// Optional Ark address to set as the wallet's default destination (auto-sweep target).
-    /// Ignored if Wallet is an Ark address (which sets destination automatically).
-    /// </summary>
-    public string? Destination { get; set; }
 
     /// <summary>
     /// If true, also configures Arkade Lightning (LN) for this store. Default: true.

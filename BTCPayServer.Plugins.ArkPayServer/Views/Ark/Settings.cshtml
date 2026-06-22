@@ -67,46 +67,6 @@
         </div>
     }
 
-    <div class="py-3 border-bottom">
-        <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
-            <div>
-                <div class="fw-semibold">Auto-send</div>
-                <div class="text-muted small">Forward received funds to another address.</div>
-            </div>
-            <span class="badge @(Model.IsDestinationSweepEnabled ? "text-bg-info" : "text-bg-secondary")" data-testid="auto-sweep-status">
-                @(Model.IsDestinationSweepEnabled ? "Enabled" : "Disabled")
-            </span>
-        </div>
-
-        @if (Model.CanManagePrivateKeys)
-        {
-            <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId">
-                @if (!string.IsNullOrEmpty(Model.Form.Destination))
-                {
-                    <div class="input-group">
-                        <input type="text" class="form-control font-monospace" value="@Model.Form.Destination" readonly data-testid="auto-sweep-destination" />
-                        <button type="submit" name="command" value="clear-destination" class="btn btn-outline-danger">Disable</button>
-                    </div>
-                }
-                else
-                {
-                    <div class="row g-2">
-                        <div class="col-md">
-                            <input name="Destination" value="@Model.Form.Destination" class="form-control font-monospace" placeholder="ark1..." data-testid="auto-sweep-destination-input" />
-                        </div>
-                        <div class="col-md-auto">
-                            <button type="submit" name="command" value="save" class="btn btn-primary w-100">Enable</button>
-                        </div>
-                    </div>
-                }
-            </form>
-        }
-        else if (!string.IsNullOrEmpty(Model.Form.Destination))
-        {
-            <div class="form-control-plaintext font-monospace text-break">@Model.Form.Destination</div>
-        }
-    </div>
-
     <div class="d-flex align-items-center justify-content-between gap-3 py-3 border-bottom">
         <div>
             <div class="fw-semibold">Small amounts</div>
@@ -114,8 +74,7 @@
         </div>
         <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId">
             <button type="submit" name="command" value="toggle-subdust"
-                    class="btn @(Model.AllowSubDustAmounts ? "btn-outline-secondary" : "btn-primary")"
-                    @(Model.IsDestinationSweepEnabled && !Model.AllowSubDustAmounts ? "disabled" : "")>
+                    class="btn @(Model.AllowSubDustAmounts ? "btn-outline-secondary" : "btn-primary")">
                 @(Model.AllowSubDustAmounts ? "Disable" : "Enable")
             </button>
         </form>

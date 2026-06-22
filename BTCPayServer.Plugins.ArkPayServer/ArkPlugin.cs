@@ -32,9 +32,7 @@ using NArk.Swaps.Boltz.Client;
 using NArk.Swaps.Services;
 using NBitcoin;
 using System.Text.Json;
-using BTCPayServer.Plugins.ArkPayServer.Services.Policies;
 using Microsoft.EntityFrameworkCore;
-using NArk.Core.Sweeper;
 
 namespace BTCPayServer.Plugins.ArkPayServer;
 
@@ -297,8 +295,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // "operator unavailable" banner instead of leaking raw gRPC/HTTP errors.
         services.AddSingleton<ArkOperatorHealthService>();
         services.AddSingleton<BoltzHealthService>();
-
-        services.AddSingleton<ISweepPolicy, DestinationSweepPolicy>();
 
         services.AddSingleton<ArkadeCheckoutModelExtension>();
         services.AddSingleton<ICheckoutModelExtension>(sp => sp.GetRequiredService<ArkadeCheckoutModelExtension>());

@@ -10,8 +10,7 @@ public enum WalletSetupMode
     /// Existing behaviour: the controller inspects <see cref="InitialWalletSetupViewModel.Wallet"/>
     /// and routes by content — empty triggers a freshly generated HD wallet,
     /// <c>nsec...</c> creates a SingleKey wallet, a BIP-39 mnemonic creates an
-    /// HD wallet, an Arkade address creates a transitory auto-sweep wallet,
-    /// and an existing wallet id reuses that wallet. Default for back-compat.
+    /// HD wallet, and an existing wallet id reuses that wallet. Default for back-compat.
     /// </summary>
     Auto = 0,
 

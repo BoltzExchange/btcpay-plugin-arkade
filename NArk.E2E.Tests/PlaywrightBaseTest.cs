@@ -133,7 +133,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     /// <summary>
     /// Creates a store and sets up its Arkade wallet through the plugin's
     /// setup wizard. Pass <c>null</c> to take the "Create a new wallet" path;
-    /// pass any non-null string (nsec, BIP-39 seed phrase, npub, or existing
+    /// pass any non-null string (nsec, BIP-39 seed phrase, or existing
     /// wallet-id) to take the import path. Returns the storeId once the wizard
     /// has redirected away from /initial-setup.
     /// </summary>

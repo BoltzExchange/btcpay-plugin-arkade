@@ -159,13 +159,13 @@ public class ArkController(
                     var wallet = walletSettings.IsWatchOnlyDescriptor
                         ? await WalletFactory.CreateWatchOnlyWallet(
                             walletSettings.Wallet,
-                            destination: walletSettings.Destination,
+                            destination: null,
                             serverInfo,
                             metadata: null,
                             HttpContext.RequestAborted)
                         : await WalletFactory.CreateWallet(
                             walletSettings.Wallet,
-                            walletSettings.Destination,
+                            destination: null,
                             serverInfo,
                             HttpContext.RequestAborted);
 
@@ -317,7 +317,6 @@ public class ArkController(
         if (errorResult != null) return errorResult;
 
         var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
-        var destination = wallet?.Destination;
 
         // Get balances with error handling - indexer service may be unavailable
         ArkBalancesViewModel? balances = null;
@@ -470,11 +469,9 @@ public class ArkController(
         return View(new StoreOverviewViewModel
         {
             StoreId = store!.Id,
-            IsDestinationSweepEnabled = destination is not null,
             IsLightningEnabled = IsArkadeLightningEnabled(),
             Balances = balances,
             WalletId = config.WalletId,
-            Destination = destination,
             SignerAvailable = signerAvailable,
             DefaultAddress = defaultAddress,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
@@ -550,7 +547,6 @@ public class ArkController(
         if (errorResult != null) return errorResult;
 
         var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
-        var destination = wallet?.Destination;
         var (boltzConnected, boltzError, _) = await GetBoltzConnectionStatusAsync(cancellationToken);
         var canManagePrivateKeys = config.GeneratedByStore ||
             (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
@@ -560,10 +556,8 @@ public class ArkController(
             WalletType = wallet?.WalletType ?? WalletType.SingleKey,
             CanManagePrivateKeys = canManagePrivateKeys,
             IsLightningEnabled = IsArkadeLightningEnabled(),
-            IsDestinationSweepEnabled = destination is not null,
             Form = new StoreSettingsFormModel
             {
-                Destination = destination,
                 MinBoardingAmountSats = config.MinBoardingAmountSats
             },
             AllowSubDustAmounts = config.AllowSubDustAmounts,
@@ -2045,41 +2039,8 @@ public class ArkController(
             return RedirectWithSuccess(returnAction, "Wallet marked as backed up.", new { storeId });
         }
 
-        if (command == "clear-destination")
-        {
-            await UpdateWalletDestinationAsync(arkConfig.WalletId!, null, cancellationToken);
-            return RedirectWithSuccess(nameof(Settings), "Auto-sweep destination cleared.", new { storeId });
-        }
-
-        if (command == "save")
-        {
-            if (string.IsNullOrWhiteSpace(model.Destination))
-                return RedirectWithError(nameof(Settings), "Enter an Arkade destination address.", new { storeId });
-
-            if (arkConfig.AllowSubDustAmounts)
-                return RedirectWithError(nameof(Settings), "Cannot configure auto-sweep while sub-dust amounts are enabled. Disable sub-dust amounts first.", new { storeId });
-
-            try
-            {
-                var serverInfo = await clientTransport.GetServerInfoAsync(cancellationToken);
-                WalletFactory.ValidateDestination(model.Destination, serverInfo);
-                await UpdateWalletDestinationAsync(arkConfig.WalletId!, model.Destination, cancellationToken);
-                return RedirectWithSuccess(nameof(Settings), "Auto-sweep destination updated.", new { storeId });
-            }
-            catch (Exception ex)
-            {
-                return RedirectWithError(nameof(Settings), $"Failed to update destination: {ex.Message}", new { storeId });
-            }
-        }
-
         if (command == "toggle-subdust")
         {
-            var toggleWallet = await walletStorage.GetWalletById(arkConfig.WalletId!, cancellationToken);
-            var destination = toggleWallet?.Destination;
-
-            if (!arkConfig.AllowSubDustAmounts && !string.IsNullOrEmpty(destination))
-                return RedirectWithError(nameof(Settings), "Cannot enable sub-dust amounts while auto-sweep is configured. Clear the auto-sweep destination first.", new { storeId });
-
             var newConfig = arkConfig with { AllowSubDustAmounts = !arkConfig.AllowSubDustAmounts };
             storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
             await storeRepository.UpdateStore(storeData);
@@ -2861,13 +2822,13 @@ public class ArkController(
             var trimmed = wallet.Trim();
             var existingWatchOnly = await walletStorage.GetWalletById(trimmed, HttpContext.RequestAborted);
             if (existingWatchOnly is not null)
-                return new TemporaryWalletSettings(null, trimmed, null, false, false);
+                return new TemporaryWalletSettings(null, trimmed, false, false);
 
-            return new TemporaryWalletSettings(trimmed, null, null, false, false, IsWatchOnlyDescriptor: true);
+            return new TemporaryWalletSettings(trimmed, null, false, false, IsWatchOnlyDescriptor: true);
         }
 
         if (string.IsNullOrWhiteSpace(wallet))
-            return new TemporaryWalletSettings(GenerateWallet(), null, null, true, true);
+            return new TemporaryWalletSettings(GenerateWallet(), null, true, true);
 
         if (wallet.StartsWith("nsec", StringComparison.InvariantCultureIgnoreCase))
         {
@@ -2880,9 +2841,9 @@ public class ArkController(
             {
                 var existing = await walletStorage.GetWalletById(candidateId, HttpContext.RequestAborted);
                 if (existing is not null)
-                    return new TemporaryWalletSettings(null, candidateId, null, true, false);
+                    return new TemporaryWalletSettings(null, candidateId, true, false);
             }
-            return new TemporaryWalletSettings(wallet, null, null, true, false);
+            return new TemporaryWalletSettings(wallet, null, true, false);
         }
 
         // Check if input is a BIP-39 mnemonic (12 or 24 words)
@@ -2893,7 +2854,7 @@ public class ArkController(
             {
                 // Validate the mnemonic
                 var mnemonic = new Mnemonic(wallet.Trim(), Wordlist.English);
-                return new TemporaryWalletSettings(mnemonic.ToString(), null, null, true, false);
+                return new TemporaryWalletSettings(mnemonic.ToString(), null, true, false);
             }
             catch
             {
@@ -2901,15 +2862,10 @@ public class ArkController(
             }
         }
 
-        if (ArkAddress.TryParse(wallet, out var addr))
-        {
-            var terms = await clientTransport.GetServerInfoAsync();
-            var serverKey = terms.SignerKey.Extract().XOnlyPubKey;
-
-            return !serverKey.ToBytes().SequenceEqual(addr!.ServerKey.ToBytes()) ? throw new Exception("Invalid destination address") : new TemporaryWalletSettings(GenerateWallet(), null, wallet, true, true);
-        }
         var existingWallet = await walletStorage.GetWalletById(wallet, HttpContext.RequestAborted);
-        return existingWallet == null ? throw new Exception("Unsupported value. Enter a BIP-39 seed phrase (12 or 24 words), nsec private key, Arkade address, or wallet ID.") : new TemporaryWalletSettings(null, wallet, null, false, false);
+        return existingWallet == null
+            ? throw new Exception("Unsupported value. Enter a BIP-39 seed phrase (12 or 24 words), nsec private key, or wallet ID.")
+            : new TemporaryWalletSettings(null, wallet, false, false);
     }
     private static string GenerateWallet()
     {
@@ -2925,7 +2881,7 @@ public class ArkController(
         return store.GetPaymentMethodConfig<T>(paymentMethodId, paymentMethodHandlerDictionary);
     }
 
-    private record TemporaryWalletSettings(string? Wallet, string? WalletId, string? Destination, bool IsOwnedByStore, bool IsNewlyGeneratedWallet, bool IsWatchOnlyDescriptor = false);
+    private record TemporaryWalletSettings(string? Wallet, string? WalletId, bool IsOwnedByStore, bool IsNewlyGeneratedWallet, bool IsWatchOnlyDescriptor = false);
 
     [HttpGet("~/stores/{storeId}/payout-processors/ark-automated")]
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
@@ -3080,7 +3036,6 @@ public class ArkController(
         if (adminWallet == null)
             return RedirectWithError(nameof(ListWallets), "Wallet not found.");
 
-        var destination = adminWallet.Destination;
         var balances = await GetArkBalances(walletId, cancellationToken);
         var signerAvailable = await walletProvider.GetAddressProviderAsync(walletId, cancellationToken) != null;
 
@@ -3111,11 +3066,9 @@ public class ArkController(
 
         return View("StoreOverview", new StoreOverviewViewModel
         {
-            IsDestinationSweepEnabled = destination is not null,
             IsLightningEnabled = false, // Admin view doesn't check Lightning
             Balances = balances,
             WalletId = walletId,
-            Destination = destination,
             SignerAvailable = signerAvailable,
             Wallet = adminWallet.Secret,
             DefaultAddress = defaultAddress,
@@ -4211,20 +4164,6 @@ public class ArkController(
                            i.State == ArkIntentState.WaitingForBatch ||
                            i.State == ArkIntentState.BatchInProgress),
                      cancellationToken);
-    }
-
-    /// <summary>
-    /// BTCPay-specific helper to update a wallet's destination address.
-    /// </summary>
-    private async Task UpdateWalletDestinationAsync(string walletId, string? destination, CancellationToken cancellationToken = default)
-    {
-        await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var wallet = await ctx.Wallets.FirstOrDefaultAsync(w => w.Id == walletId, cancellationToken);
-        if (wallet != null)
-        {
-            wallet.WalletDestination = destination;
-            await ctx.SaveChangesAsync(cancellationToken);
-        }
     }
 
     #endregion

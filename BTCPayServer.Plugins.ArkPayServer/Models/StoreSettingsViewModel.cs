@@ -8,7 +8,6 @@ public class StoreSettingsViewModel
     public bool CanManagePrivateKeys { get; set; }
 
     public bool IsLightningEnabled { get; set; }
-    public bool IsDestinationSweepEnabled { get; set; }
     public StoreSettingsFormModel Form { get; set; } = new();
     public bool AllowSubDustAmounts { get; set; }
     public bool BoardingEnabled { get; set; }
