@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.4.2] - 2026-06-15
+
+### SDK (NNark)
+- **Bumped to `arkade-os/dotnet-sdk` master @ `0b8d299` (#139).** Every gRPC and REST request now also carries an `X-SDK-VERSION` header reporting the SDK's own version as a `dotnet-sdk/{version}` product token (e.g. `dotnet-sdk/1.0.327-beta`), alongside the existing `X-Build-Version` (the arkd build the SDK targets). The version comes from Nerdbank.GitVersioning with the `+commit` build-metadata stripped; it lets arkd distinguish the .NET SDK from other SDKs and log the calling version for diagnostics. SDK-only, no plugin-runtime change.
+
+## [2.4.1] - 2026-06-14
+
+### SDK (NNark)
+- **Bumped to `arkade-os/dotnet-sdk` master @ `29d92af` (#137).** Raises the `X-Build-Version` the SDK reports to arkd from `0.9.7` to `0.9.9` (matching arkd `v0.9.9`). Also adds real-rotation end-to-end test coverage on the SDK side (destination-disable, within-cutoff sweep migration, past-cutoff held-back, driven by arkade-regtest's `rotate-signer`) — test-only, no plugin-runtime change.
+
+## [2.4.0] - 2026-06-13
+
+### Features
+- **Sweep-destination safety on signer rotation.** When the Arkade operator rotates its signer, a configured sweep destination keyed to the now-deprecated signer is automatically disabled — sweeping pauses (funds stay on the current signer) and the merchant is alerted two ways: a BTCPay **notification** (bell, linking to the store's Arkade overview) and a **warning banner** on the store overview. Re-confirm a current-signer destination from the banner to resume sweeping. Detection and enforcement are SDK-owned, so the plugin never sweeps to a stale address regardless of whether the merchant has reacted yet.
+
+### SDK (NNark)
+- **Bumped to the `arkade-os/dotnet-sdk` commit carrying destination signer-change safety.** Adds `DestinationSafety.IsStale`, the `IDestinationSafetyNotifier.DestinationDisabled` event, the `destination:pendingConfirmation` wallet-`Metadata` flag set/cleared by `ContractReconciliationService`, and the `DefaultWalletProvider` self-output fallback while a destination is flagged.
+
+## [2.3.0] - 2026-06-13
+
+### Features
+- **arkd signer-key rotation support (#78).** When an Arkade operator rotates its signing key, a wallet's existing contracts and Arkade addresses (derived from the *server* signer key) go stale. The plugin now keeps the SingleKey **"Default"** receive contract aligned with the operator's current signer automatically: store setup and Greenfield wallet creation delegate to the SDK's `EnsureDefaultAsync`, and the store overview reads the SDK's reconciled Default directly instead of re-deriving it. The rotation mechanism itself is SDK-owned (see below), so the plugin stays a thin BTCPay adapter — no plugin-side polling or migration code; funds under a superseded signer are swept, held, or re-enrolled by the SDK's hosted services.
+
+### SDK (NNark)
+- **Bumped to `arkade-os/dotnet-sdk` master @ `309885d` (#132)** — brings in the full signer-rotation mechanism and supporting work.
+- **Reconciliation & discovery.** `ContractReconciliationService` realigns each SingleKey wallet's Default to the current signer on startup, `WalletSaved`, and rotation; `SingleKeyVtxoRecoveryService` rediscovers VTXOs across the `{current ∪ deprecated}` signer set so funds stranded under a rotated key are recovered.
+- **Detection.** Rotation is detected through the `ServerInfoChanged` event — both mid-request (`DIGEST_MISMATCH`) and on the 5-minute server-info TTL refresh — rather than polling.
+- **Three fund regimes.** Before the cutoff, deprecated-signer VTXOs are collaboratively swept onto the current signer (`ServerKeyRotationSweepPolicy`); after the cutoff a coin can no longer be spent offchain nor selected into a batch while it still needs a forfeit (it would brick the whole intent); after expiry it re-enrolls forfeit-free under the current signer.
+- **Transport hardening (#134).** `DIGEST_MISMATCH` / `BUILD_VERSION_TOO_OLD` are now translated mid-stream on server-streaming and duplex RPCs (`GuardedStreamReader`), `ServerInfoChanged` dispatch is deferred past the lock to avoid a re-entrant deadlock, and the caching transport is registered as a concrete singleton aliased to both `IClientTransport` and `IServerInfoCacheInvalidation` (no unsafe cast).
+- **Headers & E2E baseline.** Every gRPC/REST request carries `X-Build-Version` and `X-Digest`; the E2E stack moved to arkd **v0.9.9-rc.1** with a deprecated signer pre-configured so the rotation sweeper runs in CI.
+- Plus master changes since the last bump: a 50-VTXO-per-intent cap (#125), `ECXOnlyPubKeyComparer` (#127), and E2E stabilization (#129, #130).
+
+## [2.2.1] - 2026-06-09
+
+### Features
+- **Wallet recovery on import + manual Rescan (#70).** Importing a wallet now starts background recovery via the SDK's unified `IWalletRecoveryService` — rediscovering contracts (including legacy deprecated-signer scripts), the derivation index, funds, and Boltz swaps, then syncing boarding UTXOs — instead of only polling pre-existing contracts. Adds a `POST stores/{id}/rescan` endpoint and a **Rescan** button on the store overview, with an in-memory `RecoveryStatusTracker` surfacing Running/Completed/Failed per wallet. When the SDK's recovery service isn't registered (no Boltz/swaps configured), recovery degrades to a boarding-only sync.
+
+### SDK (NNark)
+- **Bumped to `arkade-os/dotnet-sdk` master.** Picks up the Boltz swap-logic refactor (#123) and the regtest denigiri Postgres-port pin (#120). The refactor relocated the swap-status helpers (`IsActive`, `IsTerminalState`, `IsSuccess`, …) into `NArk.Swaps.Extensions`; the plugin's Razor views now import that namespace via `_ViewImports.cshtml` so `swap.Status.IsActive()` resolves.
+
 ## [2.2.0] - 2026-05-28
 
 ### Features

@@ -264,11 +264,9 @@
                             <td class="align-middle text-end">
                                 @if (swap.Status.IsActive())
                                 {
-                                    <form asp-action="PollSwap" asp-route-storeId="@Model.StoreId" asp-route-swapId="@swap.SwapId" method="post" class="d-inline">
-                                        <button type="submit" class="btn btn-link p-0 text-secondary" title="Manually poll swap status" data-bs-toggle="tooltip">
-                                            <vc:icon symbol="actions-refresh" />
-                                        </button>
-                                    </form>
+                                    <button type="submit" form="poll-form-@swap.SwapId.GetHashCode()" class="btn btn-link p-0 text-secondary" title="Manually poll swap status" data-bs-toggle="tooltip">
+                                        <vc:icon symbol="actions-refresh"/>
+                                    </button>
                                 }
                             </td>
                         </tr>
@@ -279,6 +277,11 @@
     </form>
 
     <vc:pager view-model="Model" />
+
+    @foreach (var swap in Model.Swaps.Where(s => s.Status.IsActive()))
+    {
+        <form id="poll-form-@swap.SwapId.GetHashCode()" asp-action="PollSwap" asp-route-storeId="@Model.StoreId" asp-route-swapId="@swap.SwapId" method="post" style="display:none;"></form>
+    }
 }
 else
 {
