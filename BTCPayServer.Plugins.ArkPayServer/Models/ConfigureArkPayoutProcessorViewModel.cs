@@ -25,7 +25,7 @@ public class ConfigureArkPayoutProcessorViewModel
     {
         return new ArkAutomatedPayoutBlob {
             ProcessNewPayoutsInstantly = ProcessNewPayoutsInstantly,
-            Interval = TimeSpan.FromMinutes(IntervalMinutes), 
+            Interval = TimeSpan.FromMinutes(IntervalMinutes),
         };
     }
 }

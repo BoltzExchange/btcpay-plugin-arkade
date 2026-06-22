@@ -11,6 +11,7 @@ public class StoreSettingsViewModel
     public StoreSettingsFormModel Form { get; set; } = new();
     public bool AllowSubDustAmounts { get; set; }
     public bool BoardingEnabled { get; set; }
+    public IReadOnlyList<SettlementOptionModel> SettlementOptions { get; set; } = [];
 
     public string? BoltzUrl { get; set; }
     public bool BoltzConnected { get; set; }

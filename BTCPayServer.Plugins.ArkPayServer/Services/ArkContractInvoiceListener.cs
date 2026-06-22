@@ -1,4 +1,5 @@
 ﻿using System.Threading.Channels;
+using BTCPayServer;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
 using BTCPayServer.Events;

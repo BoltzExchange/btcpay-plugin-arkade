@@ -2,6 +2,7 @@
 @using BTCPayServer.Plugins.ArkPayServer.Helpers
 @using NArk.Swaps.Models
 @using NBitcoin
+@using static BTCPayServer.Plugins.ArkPayServer.Helpers.ArkViewHelpers
 @inject ArkNetworkConfig ArkNetworkConfig
 @model IEnumerable<ArkSwap>
 
@@ -68,14 +69,7 @@
                                     <vc:truncate-center text="@swap.SwapId" link="@boltzSwapLink" classes="truncate-center-id"/>
                                 </td>
                                 <td>
-                                    @if (swap.SwapType == ArkSwapType.ReverseSubmarine)
-                                    {
-                                        <span class="badge text-bg-primary">Reverse</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="badge text-bg-info">Submarine</span>
-                                    }
+                                    <span class="badge @GetSwapTypeBadgeClass(swap.SwapType)">@GetSwapTypeLabel(swap.SwapType)</span>
                                 </td>
                                 <td>@Money.Satoshis(swap.ExpectedAmount).ToDecimal(MoneyUnit.BTC) BTC</td>
                                 <td>
@@ -131,14 +125,7 @@
                                 <vc:truncate-center text="@swap.SwapId" link="@boltzSwapLink" classes="truncate-center-id"/>
                             </td>
                             <td>
-                                @if (swap.SwapType == ArkSwapType.ReverseSubmarine)
-                                {
-                                    <span class="badge text-bg-primary">Reverse</span>
-                                }
-                                else
-                                {
-                                    <span class="badge text-bg-info">Submarine</span>
-                                }
+                                <span class="badge @GetSwapTypeBadgeClass(swap.SwapType)">@GetSwapTypeLabel(swap.SwapType)</span>
                             </td>
                             <td>@Money.Satoshis(swap.ExpectedAmount).ToDecimal(MoneyUnit.BTC) BTC</td>
                             <td>

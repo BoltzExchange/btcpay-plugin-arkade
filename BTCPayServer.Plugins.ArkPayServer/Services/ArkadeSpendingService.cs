@@ -6,6 +6,7 @@ using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Exceptions;
 using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
+using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
 using BTCPayServer.Services.Invoices;
 using NArk.Abstractions;
 using NArk.Abstractions.Contracts;
@@ -20,6 +21,7 @@ public class ArkadeSpendingService(
     IClientTransport clientTransport,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
+    ISettlementService settlementService,
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary)
 {
     /// <summary>
@@ -27,8 +29,8 @@ public class ArkadeSpendingService(
     /// </summary>
     /// <param name="store">Store whose Arkade wallet should be used.</param>
     /// <param name="destination">
-    /// Destination string. Supported formats: bare Ark address, BIP21 URI (with <c>ark</c> query parameter
-    /// or Ark address host), Lightning BOLT11 invoice (optionally prefixed with <c>lightning:</c>).
+    /// Destination string. Supported formats: bare Ark address, Bitcoin address, BIP21 URI,
+    /// or Lightning BOLT11 invoice (optionally prefixed with <c>lightning:</c>).
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
@@ -43,8 +45,8 @@ public class ArkadeSpendingService(
     /// </summary>
     /// <param name="store">Store whose Arkade wallet should be used.</param>
     /// <param name="destination">
-    /// Destination string. Supported formats: bare Ark address, BIP21 URI (with <c>ark</c> query parameter
-    /// or Ark address host), Lightning BOLT11 invoice (optionally prefixed with <c>lightning:</c>).
+    /// Destination string. Supported formats: bare Ark address, Bitcoin address, BIP21 URI,
+    /// or Lightning BOLT11 invoice (optionally prefixed with <c>lightning:</c>).
     /// </param>
     /// <param name="amountSats">
     /// Optional amount in satoshis. When provided, overrides any amount embedded in the destination
@@ -123,6 +125,39 @@ public class ArkadeSpendingService(
 
             var resp = await lnClient.Pay(bolt11.ToString(), cancellationToken);
             return resp.Result == PayResult.Ok ? null : throw new ArkadePaymentFailedException($"Payment failed: {resp?.ErrorDetail}");
+        }
+
+        var (btcAddress, settlementAmount) = TryResolveBitcoinSettlementDestination(destination, terms.Network);
+        if (btcAddress is not null)
+        {
+            if (hasExplicitInputs)
+                throw new MalformedPaymentDestination(
+                    "inputOutpoints is not supported for Bitcoin settlement destinations.");
+
+            var transferAmount = amountSats.HasValue ? Money.Satoshis(amountSats.Value) : settlementAmount;
+            if (transferAmount is null || transferAmount == Money.Zero)
+                throw new MalformedPaymentDestination(
+                    "Bitcoin settlement requires an amount: provide amountSats, or include an amount in the BIP21 URI.");
+
+            try
+            {
+                var result = await settlementService.InitiateTransfer(
+                    new SettlementTransferRequest(
+                        config.WalletId,
+                        transferAmount.Satoshi,
+                        SettlementDestination.Bitcoin(btcAddress.ToString())),
+                    cancellationToken);
+
+                return result.TransferId;
+            }
+            catch (MalformedPaymentDestination)
+            {
+                throw;
+            }
+            catch (Exception e) when (e is not IncompleteArkadeSetupException && e is not OperationCanceledException)
+            {
+                throw new ArkadePaymentFailedException(e.Message);
+            }
         }
 
         // Resolve destination + amount for Ark-targeted payments.
@@ -217,6 +252,49 @@ public class ArkadeSpendingService(
         }
 
         return (null, null);
+    }
+
+    private static (BitcoinAddress? Address, Money? Amount) TryResolveBitcoinSettlementDestination(
+        string destination,
+        Network network)
+    {
+        if (Uri.TryCreate(destination, UriKind.Absolute, out var uri) &&
+            uri.Scheme.Equals("bitcoin", StringComparison.InvariantCultureIgnoreCase))
+        {
+            var host = uri.AbsoluteUri[(uri.Scheme.Length + 1)..].Split('?')[0];
+            var qs = uri.ParseQueryString();
+
+            if (!string.IsNullOrEmpty(qs["ark"]) || ArkAddress.TryParse(host, out _))
+                return (null, null);
+
+            var address = CreateBitcoinAddressOrNull(host, network);
+            if (address is null)
+                return (null, null);
+
+            Money? amount = null;
+            if (qs["amount"] is { Length: > 0 } amountStr &&
+                decimal.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var amountBtc) &&
+                amountBtc > 0)
+            {
+                amount = Money.Coins(amountBtc);
+            }
+
+            return (address, amount);
+        }
+
+        return (CreateBitcoinAddressOrNull(destination, network), null);
+    }
+
+    private static BitcoinAddress? CreateBitcoinAddressOrNull(string value, Network network)
+    {
+        try
+        {
+            return BitcoinAddress.Create(value, network);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
