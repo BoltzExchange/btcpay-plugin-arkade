@@ -1,4 +1,10 @@
 
+<a name="v2.12.2"></a>
+## [v2.12.2] - 2026-07-02
+### Fix
+- limit utxos in auto consolidation ([#694](https://github.com/BoltzExchange/boltz-client/issues/694))
+
+
 <a name="v2.12.1"></a>
 ## [v2.12.1] - 2026-06-18
 ### Feat
@@ -939,6 +945,7 @@
 - improve Channel Creation enforcement
 
 
+[v2.12.2]: https://github.com/BoltzExchange/boltz-client/compare/v2.12.1...v2.12.2
 [v2.12.1]: https://github.com/BoltzExchange/boltz-client/compare/v2.12.0...v2.12.1
 [v2.12.0]: https://github.com/BoltzExchange/boltz-client/compare/v2.11.3...v2.12.0
 [v2.11.3]: https://github.com/BoltzExchange/boltz-client/compare/v2.11.2...v2.11.3
