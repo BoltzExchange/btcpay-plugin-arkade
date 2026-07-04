@@ -482,7 +482,6 @@ public class ArkController(
             Wallet = wallet?.Secret,
             WalletType = wallet?.WalletType ?? WalletType.SingleKey,
             CanManagePrivateKeys = canManagePrivateKeys,
-            DestinationPendingConfirmation = wallet?.Metadata?.ContainsKey(NArk.Core.Services.DestinationSafety.PendingConfirmationMetadataKey) == true,
             RecoveryStatus = config.WalletId is { } recoveryWalletId ? recoveryStatusTracker.Get(recoveryWalletId) : null,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
             ArkOperatorConnected = arkOperatorStatus.Available,
