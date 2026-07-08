@@ -8,15 +8,17 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
     /// <inheritdoc />
     public partial class Initial : Migration
     {
+        private const string SchemaName = "BTCPayServer.Plugins.Boltz.Arkade";
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.EnsureSchema(
-                name: "BTCPayServer.Plugins.Boltz.Arkade");
+                name: SchemaName);
 
             migrationBuilder.CreateTable(
                 name: "Intents",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 columns: table => new
                 {
                     IntentTxId = table.Column<string>(type: "text", nullable: false),
@@ -44,7 +46,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "Vtxos",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 columns: table => new
                 {
                     TransactionId = table.Column<string>(type: "text", nullable: false),
@@ -71,7 +73,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "Wallets",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 columns: table => new
                 {
                     Id = table.Column<string>(type: "text", nullable: false),
@@ -89,7 +91,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "IntentVtxos",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 columns: table => new
                 {
                     IntentTxId = table.Column<string>(type: "text", nullable: false),
@@ -103,14 +105,14 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     table.ForeignKey(
                         name: "FK_IntentVtxos_Intents_IntentTxId",
                         column: x => x.IntentTxId,
-                        principalSchema: "BTCPayServer.Plugins.Boltz.Arkade",
+                        principalSchema: SchemaName,
                         principalTable: "Intents",
                         principalColumn: "IntentTxId",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
                         name: "FK_IntentVtxos_Vtxos_VtxoTransactionId_VtxoTransactionOutputIn~",
                         columns: x => new { x.VtxoTransactionId, x.VtxoTransactionOutputIndex },
-                        principalSchema: "BTCPayServer.Plugins.Boltz.Arkade",
+                        principalSchema: SchemaName,
                         principalTable: "Vtxos",
                         principalColumns: new[] { "TransactionId", "TransactionOutputIndex" },
                         onDelete: ReferentialAction.Cascade);
@@ -118,7 +120,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "WalletContracts",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 columns: table => new
                 {
                     Script = table.Column<string>(type: "text", nullable: false),
@@ -136,7 +138,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     table.ForeignKey(
                         name: "FK_WalletContracts_Wallets_WalletId",
                         column: x => x.WalletId,
-                        principalSchema: "BTCPayServer.Plugins.Boltz.Arkade",
+                        principalSchema: SchemaName,
                         principalTable: "Wallets",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
@@ -144,7 +146,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "Swaps",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 columns: table => new
                 {
                     SwapId = table.Column<string>(type: "text", nullable: false),
@@ -167,14 +169,14 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     table.ForeignKey(
                         name: "FK_Swaps_WalletContracts_ContractScript_WalletId",
                         columns: x => new { x.ContractScript, x.WalletId },
-                        principalSchema: "BTCPayServer.Plugins.Boltz.Arkade",
+                        principalSchema: SchemaName,
                         principalTable: "WalletContracts",
                         principalColumns: new[] { "Script", "WalletId" },
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
                         name: "FK_Swaps_Wallets_WalletId",
                         column: x => x.WalletId,
-                        principalSchema: "BTCPayServer.Plugins.Boltz.Arkade",
+                        principalSchema: SchemaName,
                         principalTable: "Wallets",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
@@ -182,7 +184,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateIndex(
                 name: "IX_Intents_IntentId",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "Intents",
                 column: "IntentId",
                 unique: true,
@@ -190,37 +192,37 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
             migrationBuilder.CreateIndex(
                 name: "IX_IntentVtxos_VtxoTransactionId_VtxoTransactionOutputIndex",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "IntentVtxos",
                 columns: new[] { "VtxoTransactionId", "VtxoTransactionOutputIndex" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_Swaps_ContractScript_WalletId",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "Swaps",
                 columns: new[] { "ContractScript", "WalletId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_Swaps_WalletId",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "Swaps",
                 column: "WalletId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_WalletContracts_Scope",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "WalletContracts",
                 column: "Scope");
 
             migrationBuilder.CreateIndex(
                 name: "IX_WalletContracts_WalletId",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "WalletContracts",
                 column: "WalletId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Wallets_Wallet",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade",
+                schema: SchemaName,
                 table: "Wallets",
                 column: "Wallet",
                 unique: true,
@@ -232,27 +234,27 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
         {
             migrationBuilder.DropTable(
                 name: "IntentVtxos",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade");
+                schema: SchemaName);
 
             migrationBuilder.DropTable(
                 name: "Swaps",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade");
+                schema: SchemaName);
 
             migrationBuilder.DropTable(
                 name: "Intents",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade");
+                schema: SchemaName);
 
             migrationBuilder.DropTable(
                 name: "Vtxos",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade");
+                schema: SchemaName);
 
             migrationBuilder.DropTable(
                 name: "WalletContracts",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade");
+                schema: SchemaName);
 
             migrationBuilder.DropTable(
                 name: "Wallets",
-                schema: "BTCPayServer.Plugins.Boltz.Arkade");
+                schema: SchemaName);
         }
     }
 }
