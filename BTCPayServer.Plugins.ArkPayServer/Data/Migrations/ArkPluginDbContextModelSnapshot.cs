@@ -17,7 +17,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("BTCPayServer.Plugins.Ark")
+                .HasDefaultSchema("BTCPayServer.Plugins.Boltz.Arkade")
                 .HasAnnotation("ProductVersion", "10.0.6")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
@@ -88,7 +88,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                         .IsUnique()
                         .HasFilter("\"IntentId\" IS NOT NULL");
 
-                    b.ToTable("Intents", "BTCPayServer.Plugins.Ark");
+                    b.ToTable("Intents", "BTCPayServer.Plugins.Boltz.Arkade");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkIntentVtxoEntity", b =>
@@ -109,7 +109,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
                     b.HasIndex("VtxoTransactionId", "VtxoTransactionOutputIndex");
 
-                    b.ToTable("IntentVtxos", "BTCPayServer.Plugins.Ark");
+                    b.ToTable("IntentVtxos", "BTCPayServer.Plugins.Boltz.Arkade");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkSwapEntity", b =>
@@ -163,7 +163,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
                     b.HasIndex("ContractScript", "WalletId");
 
-                    b.ToTable("Swaps", "BTCPayServer.Plugins.Ark");
+                    b.ToTable("Swaps", "BTCPayServer.Plugins.Boltz.Arkade");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkWalletContractEntity", b =>
@@ -189,15 +189,20 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("Metadata");
 
+                    b.Property<int>("Scope")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Script", "WalletId");
 
+                    b.HasIndex("Scope");
+
                     b.HasIndex("WalletId");
 
-                    b.ToTable("WalletContracts", "BTCPayServer.Plugins.Ark");
+                    b.ToTable("WalletContracts", "BTCPayServer.Plugins.Boltz.Arkade");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkWalletEntity", b =>
@@ -235,7 +240,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                         .IsUnique()
                         .HasFilter("\"Wallet\" IS NOT NULL");
 
-                    b.ToTable("Wallets", "BTCPayServer.Plugins.Ark");
+                    b.ToTable("Wallets", "BTCPayServer.Plugins.Boltz.Arkade");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.VtxoEntity", b =>
@@ -292,7 +297,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 
                     b.HasKey("TransactionId", "TransactionOutputIndex");
 
-                    b.ToTable("Vtxos", "BTCPayServer.Plugins.Ark");
+                    b.ToTable("Vtxos", "BTCPayServer.Plugins.Boltz.Arkade");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkIntentVtxoEntity", b =>

@@ -18,18 +18,7 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
         base.OnModelCreating(modelBuilder);
         modelBuilder.ConfigureArkEntities(opts =>
         {
-            opts.Schema = "BTCPayServer.Plugins.Ark";
-        });
-
-        // PostgreSQL-specific: jsonb column types
-        modelBuilder.Entity<ArkWalletContractEntity>(entity =>
-        {
-            entity.Property(e => e.ContractDataJson).HasColumnType("jsonb");
-            entity.Property(e => e.MetadataJson).HasColumnType("jsonb");
-        });
-        modelBuilder.Entity<ArkSwapEntity>(entity =>
-        {
-            entity.Property(e => e.MetadataJson).HasColumnType("jsonb");
+            opts.Schema = "BTCPayServer.Plugins.Boltz.Arkade";
         });
     }
 }

@@ -59,6 +59,7 @@ public class StoreOverviewViewModel
     public bool HasPaymentServiceIssue =>
         !ArkOperatorConnected || (IsLightningEnabled && !string.IsNullOrEmpty(BoltzUrl) && !BoltzConnected);
 
+
     public List<StoreOverviewStatViewModel> PaymentStats { get; set; } = [];
     public List<RecentPaymentViewModel> RecentPayments { get; set; } = [];
 }
