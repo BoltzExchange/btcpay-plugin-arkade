@@ -18,7 +18,7 @@ public class StoreOverviewViewModel
     public bool BoardingEnabled { get; set; }
     public long MinBoardingAmountSats { get; set; }
     public bool WalletBackedUp { get; set; }
-    public bool HasReceivedFunds { get; set; }
+    public bool HasCurrentWalletFunds { get; set; }
 
     public WalletType WalletType { get; set; }
     public bool CanManagePrivateKeys { get; set; }
@@ -31,7 +31,7 @@ public class StoreOverviewViewModel
         CanManagePrivateKeys &&
         SignerAvailable &&
         !WalletBackedUp &&
-        HasReceivedFunds &&
+        HasCurrentWalletFunds &&
         !string.IsNullOrEmpty(Wallet);
 
     public string? ArkOperatorUrl { get; set; }
@@ -71,6 +71,10 @@ public class RecentPaymentViewModel
     public string? Description { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "BTC";
+    public string? AmountPrefix { get; set; }
+    public string? AmountSubtext { get; set; }
+    public bool AmountSubtextSensitive { get; set; }
+    public bool ShowAmount { get; set; } = true;
     public bool IsOutgoing { get; set; }
     public PaymentStatus? PaymentStatus { get; set; }
     public ArkSwapStatus? SwapStatus { get; set; }

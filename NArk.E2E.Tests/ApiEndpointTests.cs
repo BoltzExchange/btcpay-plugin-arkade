@@ -183,8 +183,8 @@ public class ApiEndpointTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var nsec = GenerateRandomNsec();
-        var storeId = await CreateStoreWithArkWalletAsync(nsec);
+        var expectedMnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
+        var storeId = await CreateStoreWithArkWalletAsync(expectedMnemonic);
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
 
         // The Show Private Key form submits via JS — we submit the same
@@ -196,8 +196,8 @@ public class ApiEndpointTests : PlaywrightBaseTest
             url => url.Contains("/recovery-seed-backup"),
             new PageWaitForURLOptions { Timeout = 30_000 });
 
-        var mnemonic = await Page.GetAttributeAsync("#RecoveryPhrase", "data-mnemonic");
-        Assert.Equal(nsec, mnemonic);
+        var revealedMnemonic = await Page.GetAttributeAsync("#RecoveryPhrase", "data-mnemonic");
+        Assert.Equal(expectedMnemonic, revealedMnemonic);
     }
 
 }

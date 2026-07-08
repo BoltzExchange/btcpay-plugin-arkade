@@ -1358,7 +1358,7 @@ public class ArkGreenfieldController(
             return (null, wallet, false, null);
 
         throw new InvalidOperationException(
-            "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words), nsec key, or existing wallet ID.");
+            "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words) or existing wallet ID.");
     }
 
     private bool ConfigureLightning(StoreData store, string walletId)

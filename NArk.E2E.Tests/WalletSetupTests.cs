@@ -16,13 +16,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         _fixture = fixture;
     }
 
-    /// <summary>
-    /// Smoke test: register an admin, create a store, navigate to the
-    /// plugin's setup page, confirm the explanatory step is first, then
-    /// continue and confirm both wallet-creation options are rendered.
-    /// Validates that the plugin DLL loaded and the controller is wired up
-    /// — no Ark-side state is exercised.
-    /// </summary>
+    /// <summary>Fresh stores land on the Arkade getting-started flow.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task RegisterAndCreateStore_NavigateToArkWallet_ShowsSetupPage()
@@ -34,9 +28,6 @@ public class WalletSetupTests : PlaywrightBaseTest
 
         var storeId = await CreateStore();
 
-        // Plugin controller routes are mounted under /plugins/ark/...
-        // The overview action redirects to getting-started when no wallet
-        // is configured yet.
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         await Page!.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -56,11 +47,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.Equal(1, await legacyOption.CountAsync());
     }
 
-    /// <summary>
-    /// Take the "Create a new wallet" path of the wizard. After submission
-    /// the controller should generate a fresh BIP-39 HD wallet, persist it,
-    /// and redirect away from /initial-setup (typically to /overview).
-    /// </summary>
+    /// <summary>The new-wallet path creates a wallet and lands on overview.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task CreateNewHotWallet_LandsOnOverview()
@@ -111,10 +98,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.DoesNotContain("not backed up", settingsBody, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Import the legacy nsec (Nostr private key) path — the controller
-    /// should create a SingleKey wallet and redirect to overview.
-    /// </summary>
+    /// <summary>Importing an nsec creates a SingleKey wallet.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ImportNsec_StoresWallet()
@@ -129,10 +113,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.DoesNotContain("/initial-setup", Page.Url);
     }
 
-    /// <summary>
-    /// Import a 12-word BIP-39 mnemonic — the controller should create an
-    /// HD wallet and redirect to overview.
-    /// </summary>
+    /// <summary>Importing a BIP-39 seed phrase creates an HD wallet.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ImportBip39SeedPhrase_StoresHdWallet()
@@ -147,11 +128,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.DoesNotContain("/initial-setup", Page.Url);
     }
 
-    /// <summary>
-    /// Garbage input fails parsing; the wizard re-renders with a
-    /// validation error and stays on /initial-setup. (Plugin error
-    /// surfacing route: TempData[WellKnownTempData.ErrorMessage].)
-    /// </summary>
+    /// <summary>Unsupported wallet input re-renders setup with an error.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task InvalidWalletInput_ShowsValidationError()
@@ -162,26 +139,37 @@ public class WalletSetupTests : PlaywrightBaseTest
         var storeId = await CreateStore();
         await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
 
-        await Page!.ClickAsync("[data-testid='legacy-wallet-option']");
-        await Page.FillAsync("[data-testid='nsec-input']", "not-a-valid-wallet-format-xyzzy");
-        await Page.ClickAsync("[data-testid='import-wallet-btn']");
+        await OpenImportWalletSettlementStepAsync("not-a-valid-wallet-format-xyzzy");
+        await Page!.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
 
-        // Wait briefly for the form post to round-trip and re-render
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         Assert.Contains("/initial-setup", Page.Url);
-        // The error message ends up in a BTCPay alert; assert that
-        // SOMETHING about "Unsupported value" or "Could not update wallet"
-        // surfaces. (Controller throws → TempData error message.)
         var bodyText = await Page.InnerTextAsync("body");
         var sawError = bodyText.Contains("Unsupported", StringComparison.OrdinalIgnoreCase) ||
                        bodyText.Contains("Could not update wallet", StringComparison.OrdinalIgnoreCase);
         Assert.True(sawError, $"Expected an error message but page body was:\n{bodyText[..Math.Min(500, bodyText.Length)]}");
     }
 
-    /// <summary>
-    /// Arkade addresses are payment destinations, not wallet setup inputs.
-    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Overview_DeepActivityPagesOnlyShowInWalletDetails()
+    {
+        _fixture.Initialize(this);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
+
+        var storeId = await CreateStoreWithArkWalletAsync();
+        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
+
+        Assert.Equal(0, await Page!.Locator("#StoreNav-Swaps, #StoreNav-Vtxos, #StoreNav-Intents").CountAsync());
+
+        await Page.ClickAsync("[data-testid='wallet-details-toggle']");
+        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-vtxos-link']").CountAsync());
+        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-intents-link']").CountAsync());
+        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-swaps-link']").CountAsync());
+    }
+
+    /// <summary>Arkade receive addresses are rejected as wallet imports.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ImportArkadeAddress_IsRejected()
@@ -189,20 +177,21 @@ public class WalletSetupTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        // Donor store: nsec (SingleKey) wallet so the overview exposes a
-        // deterministic Arkade address. HD wallets don't render a default
-        // address on /overview — they derive per-receive instead.
+        // Use a SingleKey wallet so overview renders a stable address.
         var donorStoreId = await CreateStoreWithSingleKeyWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{donorStoreId}/overview");
         var donorAddress = await Page!.InputValueAsync("[data-testid='receive-address']");
         Assert.False(string.IsNullOrWhiteSpace(donorAddress), "donor store has no receive address");
 
         var storeId = await CreateStore();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
+        await GoToUrl($"/plugins/ark/stores/{storeId}/getting-started");
+        await Page.ClickAsync("[data-testid='getting-started-continue-btn']");
+        await Page.WaitForURLAsync(
+            url => url.Contains("/initial-setup"),
+            new PageWaitForURLOptions { Timeout = 30_000 });
 
-        await Page.ClickAsync("[data-testid='legacy-wallet-option']");
-        await Page.FillAsync("[data-testid='nsec-input']", donorAddress);
-        await Page.ClickAsync("[data-testid='import-wallet-btn']");
+        await OpenImportWalletSettlementStepAsync(donorAddress);
+        await Page.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         Assert.Contains("/initial-setup", Page.Url);
@@ -210,11 +199,7 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.Contains("Unsupported", bodyText, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Import an existing wallet by id. A wallet is created on store A;
-    /// its WalletId is scraped from the overview page and pasted into
-    /// store B's wizard. Both stores should reference the same wallet.
-    /// </summary>
+    /// <summary>Importing an existing wallet id reuses that wallet.</summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ImportWalletId_ReusesExistingWallet()

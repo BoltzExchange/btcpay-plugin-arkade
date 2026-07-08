@@ -12,6 +12,7 @@ using BTCPayServer.Plugins.ArkPayServer.Notifications;
 using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 using BTCPayServer.Plugins.ArkPayServer.Payouts.Ark;
 using BTCPayServer.Plugins.ArkPayServer.Services;
+using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
 using BTCPayServer.Plugins.ArkPayServer.Services.WalletLogger;
 using BTCPayServer.Services.Notifications;
 using Microsoft.Extensions.Configuration;
@@ -103,7 +104,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
     private static void RegisterDatabase(IServiceCollection services)
     {
-        
         services.AddSingleton<ArkPluginDbContextFactory>();
         services.AddSingleton<IDbContextFactory<ArkPluginDbContext>>(sp => sp.GetRequiredService<ArkPluginDbContextFactory>());
 
@@ -266,7 +266,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ArkadeSpendingService>();
 
-        // Remote-signer transport seam.
+        // Remote-signer transport registration.
         //
         // NArk's DefaultWalletProvider takes IRemoteSignerTransport? as an
         // optional ctor param. ASP.NET Core DI invokes the registered factory
@@ -281,12 +281,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         //    that as the IRemoteSignerTransport.
         //  - When no companion plugin is installed, we hand back a
         //    MissingDeviceProxyTransport sentinel whose KnowsWalletAsync returns
-        //    false for every wallet — so a wallet imported via the watch-only
-        //    flow falls through to genuine watch-only (DefaultWalletProvider
-        //    returns null from GetSignerAsync). The three signing methods still
-        //    throw a descriptive "install the App companion plugin" message as
-        //    defence-in-depth, but the happy path now matches user intent: pick
-        //    "watch-only" and you get watch-only, not a runtime nag.
+        //    false for every wallet, so DefaultWalletProvider returns null from
+        //    GetSignerAsync. The signing methods still throw a descriptive
+        //    "install the App companion plugin" message as defence-in-depth.
         services.AddSingleton<IRemoteSignerTransport>(sp =>
             sp.GetService<IBTCPayAppDeviceProxy>()
             ?? (IRemoteSignerTransport)new MissingDeviceProxyTransport());
@@ -305,6 +302,10 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ArkContractInvoiceListener>();
         services.AddHostedService(sp => sp.GetRequiredService<ArkContractInvoiceListener>());
+
+        services.AddSingleton<MainchainSettlementService>();
+        services.AddSingleton<ISettlementOption>(sp => sp.GetRequiredService<MainchainSettlementService>());
+        services.AddHostedService(sp => sp.GetRequiredService<MainchainSettlementService>());
 
         services.AddSingleton<BoardingTransactionListener>();
         services.AddHostedService(sp => sp.GetRequiredService<BoardingTransactionListener>());
@@ -332,6 +333,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             services.AddHttpClient<BoltzClient>();
             services.AddHttpClient<CachedBoltzClient>();
             services.AddArkSwapServices();
+            services.AddSingleton<ISettlementService, ArkadeChainSwapSettlementService>();
 
             // Tag every Boltz swap-creation request with the BTCPay-Arkade
             // referral so Boltz can credit the integration. Mirrors the
@@ -350,6 +352,8 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             services.AddSingleton<CachedBoltzClient>(_ => null!);
             services.AddSingleton<SwapsManagementService>(_ => null!);
             services.AddSingleton<BoltzLimitsValidator>(_ => null!);
+            services.AddSingleton<ISettlementService>(_ =>
+                new UnavailableSettlementService("Chain swaps require a configured Boltz endpoint."));
         }
     }
 

@@ -1,11 +1,12 @@
 #nullable enable
+using BTCPayServer.Data;
 using NArk.Abstractions;
 using NBitcoin;
 using NBitcoin.Payment;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Payouts.Ark
 {
-    public class ArkUriClaimDestination : IArkClaimDestination
+    public class ArkUriClaimDestination : IClaimDestination
     {
         private readonly BitcoinUrlBuilder _bitcoinUrl;
 
@@ -22,9 +23,21 @@ namespace BTCPayServer.Plugins.ArkPayServer.Payouts.Ark
             return _bitcoinUrl.ToString();
         }
 
-        public string Id => Address.ToString(_bitcoinUrl.Network.ChainName == ChainName.Mainnet);
+        public string? Id => ArkAddress?.ToString(_bitcoinUrl.Network.ChainName == ChainName.Mainnet) ??
+                             _bitcoinUrl.Address?.ToString();
+
         public decimal? Amount => _bitcoinUrl.Amount?.ToDecimal(MoneyUnit.BTC);
 
-        public ArkAddress Address => ArkAddress.Parse(_bitcoinUrl.UnknownParameters["ark"]);
+        public ArkAddress? ArkAddress
+        {
+            get
+            {
+                if (!_bitcoinUrl.UnknownParameters.TryGetValue("ark", out var value) ||
+                    string.IsNullOrWhiteSpace(value?.ToString()))
+                    return null;
+
+                return ArkAddress.Parse(value.ToString()!);
+            }
+        }
     }
 }

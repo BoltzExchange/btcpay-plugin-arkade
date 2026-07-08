@@ -10,7 +10,12 @@
     var storeId = ScopeProvider.GetCurrentStoreId();
     var hasValidationError = !ViewData.ModelState.IsValid;
     var hasWalletValue = !string.IsNullOrEmpty(Model.Wallet);
-    var watchOnlyValidationError = hasValidationError && Model.Mode == WalletSetupMode.WatchOnly;
+    var settlementValidationError = ViewData.ModelState
+        .Where(entry => entry.Key.StartsWith(nameof(Model.SettlementInputs), StringComparison.Ordinal))
+        .Any(entry => entry.Value?.Errors.Count > 0);
+    var importExistingActive = Model.Mode == WalletSetupMode.Auto && hasWalletValue;
+    var createNewActive = Model.Mode == WalletSetupMode.Auto && !hasWalletValue && hasValidationError;
+    var settlementStepActive = settlementValidationError && (importExistingActive || createNewActive);
 }
 
 @* Close X in the wizard navbar — mirrors BTCPay's own wallet-setup
@@ -23,116 +28,168 @@
 
 <header class="text-center">
     <h1>Set up Arkade</h1>
-    <p class="lead text-secondary mt-3">Choose how this store should receive payments.</p>
+    <p class="lead text-secondary mt-3" data-setup-subtitle>@(settlementStepActive ? "Configure settlement options for this wallet." : "Choose how this store should receive payments.")</p>
 </header>
 
-<div class="mt-5">
-    <h3 class="my-4">I have a wallet</h3>
-    <div class="list-group">
-        <a href="#" class="list-group-item list-group-item-action" data-bs-toggle="collapse" data-bs-target="#importExisting" data-testid="legacy-wallet-option">
-            <div class="image">
-                <vc:icon symbol="wallet-existing"/>
-            </div>
-            <div class="content">
-                <h4>Use an existing wallet</h4>
-                <p class="mb-0 text-secondary">Import from private key, seed phrase, or existing wallet ID</p>
-            </div>
-            <vc:icon symbol="caret-right" />
-        </a>
-        <a href="#" class="list-group-item list-group-item-action" data-bs-toggle="collapse" data-bs-target="#importWatchOnly" data-testid="watch-only-wallet-option">
-            <div class="image">
-                <vc:icon symbol="wallet-existing"/>
-            </div>
-            <div class="content">
-                <h4>Pair a watch-only wallet</h4>
-                <p class="mb-0 text-secondary">Observe a wallet by account descriptor — signing happens on a paired BTCPayApp device</p>
-            </div>
-            <vc:icon symbol="caret-right" />
-        </a>
+<div class="mt-5 @(settlementStepActive && createNewActive ? "d-none" : "")" data-setup-group>
+    <div data-setup-choice class="@(settlementStepActive ? "d-none" : "")">
+        <h3 class="my-4">I have a wallet</h3>
+        <div class="list-group">
+            <a href="#" class="list-group-item list-group-item-action" data-bs-toggle="collapse" data-bs-target="#importExisting" data-testid="legacy-wallet-option">
+                <div class="image">
+                    <vc:icon symbol="wallet-existing"/>
+                </div>
+                <div class="content">
+                    <h4>Use an existing wallet</h4>
+                    <p class="mb-0 text-secondary">Import from seed phrase or existing wallet ID</p>
+                </div>
+                <vc:icon symbol="caret-right" />
+            </a>
+        </div>
     </div>
 
-    <div id="importExisting" class="collapse mt-3 @(hasValidationError && hasWalletValue && Model.Mode == WalletSetupMode.Auto ? "show" : "")">
+    <div id="importExisting" class="collapse mt-3 @(importExistingActive ? "show" : "")">
         <div class="card">
             <div class="card-body">
                 <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId" id="importExistingForm">
                     <input type="hidden" asp-for="Mode" value="@WalletSetupMode.Auto" />
-                    <div class="form-group mb-3">
-                        <label asp-for="Wallet" class="form-label">Wallet settings</label>
-                        <input asp-for="Wallet" class="form-control" placeholder="seed phrase / nsec... / wallet-id" id="existingWalletInput" required data-testid="nsec-input"/>
-                        <span asp-validation-for="Wallet" class="text-danger"></span>
-                        <div class="form-text mt-2">
-                            <strong>Options:</strong>
-                            <ul class="mb-0">
-                                <li><strong>BIP-39 seed phrase:</strong> Import an HD wallet from 12 or 24-word mnemonic (recommended)</li>
-                                <li><strong>nsec private key:</strong> Use a legacy Nostr-style private key as a hot wallet</li>
-                                <li><strong>Wallet ID:</strong> Use an existing wallet from this BTCPay instance</li>
-                            </ul>
+                    <div data-wallet-step class="@(settlementValidationError && importExistingActive ? "d-none" : "")">
+                        <div class="form-group mb-3">
+                            <label asp-for="Wallet" class="form-label">Wallet settings</label>
+                            <input asp-for="Wallet" class="form-control" placeholder="seed phrase / wallet-id" id="existingWalletInput" required data-testid="nsec-input"/>
+                            <span asp-validation-for="Wallet" class="text-danger"></span>
+                            <div class="form-text mt-2">
+                                <strong>Options:</strong>
+                                <ul class="mb-0">
+                                    <li><strong>BIP-39 seed phrase:</strong> Import an HD wallet from 12 or 24-word mnemonic (recommended)</li>
+                                    <li><strong>Wallet ID:</strong> Use an existing wallet from this BTCPay instance</li>
+                                </ul>
+                            </div>
                         </div>
+                        <button type="button" class="btn btn-primary" data-settlement-next data-testid="import-wallet-next-btn">Continue</button>
                     </div>
-                    <button name="command" type="submit" value="save" class="btn btn-primary" data-testid="import-wallet-btn">Continue</button>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <div id="importWatchOnly" class="collapse mt-3 @(watchOnlyValidationError ? "show" : "")">
-        <div class="card">
-            <div class="card-body">
-                <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId" id="importWatchOnlyForm">
-                    <input type="hidden" asp-for="Mode" value="@WalletSetupMode.WatchOnly" />
-                    <div class="alert alert-info">
-                        <strong>Watch-only:</strong> the server stores no signing material.
-                        Signing-dependent actions (batch participation, unilateral exits) require
-                        a paired BTCPayApp device — install the <code>BTCPayServer.Plugins.App</code>
-                        companion plugin and pair a device to sign. Without it, this wallet is
-                        usable read-only.
-                    </div>
-                    <div class="form-group mb-3">
-                        <label asp-for="Wallet" class="form-label">Account Descriptor</label>
-                        <input asp-for="Wallet" class="form-control" placeholder="tr([fp/86'/0'/0']xpub.../0/*) or tr(pubkey)" id="watchOnlyDescriptorInput" required data-testid="watch-only-descriptor-input" />
-                        <span asp-validation-for="Wallet" class="text-danger"></span>
-                        <div class="form-text mt-2">
-                            <strong>Accepted formats:</strong>
-                            <ul class="mb-0">
-                                <li><strong>HD-style:</strong> <code>tr([fingerprint/86'/0'/0']xpub.../0/*)</code> — addresses derived per receive</li>
-                                <li><strong>Single-key style:</strong> <code>tr(pubkey)</code> — one reused address</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <button name="command" type="submit" value="save" class="btn btn-primary" data-testid="import-watch-only-btn">Continue</button>
+                    <partial name="_InitialSettlementOptions" model="Model" view-data='new ViewDataDictionary(ViewData) {
+                        { "SettlementPrefix", "importExisting" },
+                        { "SubmitTestId", "import-wallet-btn" },
+                        { "SubmitLabel", "Import Wallet" },
+                        { "WalletStepLabel", "Existing wallet" },
+                        { "ShowSettlementStep", settlementValidationError && importExistingActive }
+                    }' />
                 </form>
             </div>
         </div>
     </div>
 </div>
 
-<div class="mt-5">
-    <h3 class="my-4">I don't have a wallet</h3>
-    <div class="list-group">
-        <a href="#" class="list-group-item list-group-item-action" data-bs-toggle="collapse" data-bs-target="#createNew" data-testid="hd-wallet-option">
-            <div class="image">
-                <vc:icon symbol="wallet-new"/>
-            </div>
-            <div class="content">
-                <h4>Create a new wallet</h4>
-                <p class="mb-0 text-secondary">Generate a brand-new hot wallet</p>
-            </div>
-            <vc:icon symbol="caret-right"/>
-        </a>
+<div class="mt-5 @(settlementStepActive && !createNewActive ? "d-none" : "")" data-setup-group>
+    <div data-setup-choice class="@(settlementStepActive ? "d-none" : "")">
+        <h3 class="my-4">I don't have a wallet</h3>
+        <div class="list-group">
+            <a href="#createNew" class="list-group-item list-group-item-action" data-settlement-direct="#createNew" data-testid="hd-wallet-option">
+                <div class="image">
+                    <vc:icon symbol="wallet-new"/>
+                </div>
+                <div class="content">
+                    <h4>Create a new wallet</h4>
+                    <p class="mb-0 text-secondary">Generate a brand-new hot wallet</p>
+                </div>
+                <vc:icon symbol="caret-right"/>
+            </a>
+        </div>
     </div>
 
-    <div id="createNew" class="collapse mt-3 @(hasValidationError && !hasWalletValue ? "show" : "")">
+    <div id="createNew" class="collapse mt-3 @(createNewActive ? "show" : "")">
         <div class="card">
             <div class="card-body">
-                <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId">
+                <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId" id="createNewForm">
+                    <input type="hidden" asp-for="Mode" value="@WalletSetupMode.Auto" />
                     <input type="hidden" asp-for="Wallet" value="" />
-                    <div class="alert alert-info">
-                        <strong>Info:</strong> A new hot wallet will be generated automatically for you.
-                    </div>
-                    <p>This creates a new wallet for this store and stores it on your BTCPay Server. Make sure to back up your wallet after creation.</p>
-                    <button name="command" type="submit" value="save" class="btn btn-primary" data-testid="create-wallet-btn">Create Wallet</button>
+                    <partial name="_InitialSettlementOptions" model="Model" view-data='new ViewDataDictionary(ViewData) {
+                        { "SettlementPrefix", "createNew" },
+                        { "SubmitTestId", "create-wallet-btn" },
+                        { "SubmitLabel", "Create Wallet" },
+                        { "WalletStepLabel", "New hot wallet" },
+                        { "ShowSettlementStep", true }
+                    }' />
                 </form>
             </div>
         </div>
     </div>
 </div>
+
+@section PageFootContent {
+    <script>
+        const showSettlementStep = form => {
+            const currentGroup = form.closest('[data-setup-group]');
+            document.querySelectorAll('[data-setup-group]').forEach(group => {
+                group.classList.toggle('d-none', group !== currentGroup);
+            });
+            document.querySelectorAll('[data-setup-choice]').forEach(choice => {
+                choice.classList.add('d-none');
+            });
+            const subtitle = document.querySelector('[data-setup-subtitle]');
+            if (subtitle) {
+                if (!subtitle.dataset.defaultText) {
+                    subtitle.dataset.defaultText = subtitle.textContent;
+                }
+                subtitle.textContent = 'Configure settlement options for this wallet.';
+            }
+
+            form.querySelector('[data-wallet-step]')?.classList.add('d-none');
+            const settlementStep = form.querySelector('[data-settlement-step]');
+            settlementStep.classList.remove('d-none');
+            settlementStep.querySelector('[data-settlement-focus], input, button')?.focus();
+        };
+
+        document.querySelectorAll('[data-settlement-next]').forEach(button => {
+            button.addEventListener('click', () => {
+                const form = button.closest('form');
+                if (!form.reportValidity()) return;
+                showSettlementStep(form);
+            });
+        });
+
+        document.querySelectorAll('[data-settlement-direct]').forEach(link => {
+            link.addEventListener('click', event => {
+                event.preventDefault();
+                const target = document.querySelector(link.dataset.settlementDirect);
+                const form = target?.querySelector('form');
+                if (!target || !form) return;
+
+                target.classList.add('show');
+                showSettlementStep(form);
+            });
+        });
+
+        document.querySelectorAll('[data-settlement-back]').forEach(button => {
+            button.addEventListener('click', () => {
+                const form = button.closest('form');
+                form.querySelector('[data-settlement-step]').classList.add('d-none');
+                const walletStep = form.querySelector('[data-wallet-step]');
+                walletStep?.classList.remove('d-none');
+
+                document.querySelectorAll('[data-setup-group]').forEach(group => {
+                    group.classList.remove('d-none');
+                });
+                document.querySelectorAll('[data-setup-choice]').forEach(choice => {
+                    choice.classList.remove('d-none');
+                });
+                const collapse = form.closest('.collapse');
+                if (!walletStep && collapse) {
+                    if (window.bootstrap) {
+                        bootstrap.Collapse.getOrCreateInstance(collapse, { toggle: false }).hide();
+                    } else {
+                        collapse.classList.remove('show');
+                    }
+                }
+                const subtitle = document.querySelector('[data-setup-subtitle]');
+                if (subtitle?.dataset.defaultText) {
+                    subtitle.textContent = subtitle.dataset.defaultText;
+                }
+                const focusTarget = walletStep?.querySelector('input, button') ??
+                    document.querySelector(`[data-settlement-direct="#${form.closest('.collapse')?.id}"]`);
+                focusTarget?.focus();
+            });
+        });
+    </script>
+}

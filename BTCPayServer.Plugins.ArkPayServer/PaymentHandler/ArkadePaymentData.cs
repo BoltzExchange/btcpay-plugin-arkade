@@ -1,3 +1,6 @@
 namespace BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 
-public record ArkadePaymentData(string Outpoint, string? Destination = null, bool IsBoarding = false);
+public record ArkadePaymentData(
+    string Outpoint,
+    string? Destination = null,
+    bool IsBoarding = false);

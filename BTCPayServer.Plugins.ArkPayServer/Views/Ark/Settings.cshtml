@@ -1,5 +1,6 @@
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.ArkPayServer.Models
 @using BTCPayServer.Plugins.ArkPayServer.PaymentHandler
 @using NArk.Abstractions.Wallets
 @model BTCPayServer.Plugins.ArkPayServer.Models.StoreSettingsViewModel
@@ -51,6 +52,93 @@
             <span class="badge text-bg-secondary">Unavailable</span>
         </div>
     }
+
+    <div class="py-3 border-bottom">
+        <div class="mb-3">
+            <div class="fw-semibold">Settlement</div>
+            <div class="text-muted small">Choose where Arkade funds settle when configured thresholds are reached.</div>
+        </div>
+        <div class="vstack gap-3">
+            @foreach (var option in Model.SettlementOptions)
+            {
+                var optionSlug = option.Type switch
+                {
+                    StoreSettlementOption.BitcoinMainchain => "mainchain",
+                    _ => option.Type.ToString()
+                };
+                var optionTestId = $"settlement-option-{optionSlug}";
+                <form asp-action="UpdateWalletConfig"
+                      method="post"
+                      asp-route-storeId="@storeId"
+                      class="border rounded p-3 @(option.Available ? "" : "bg-light")"
+                      data-testid="@optionTestId">
+                    <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
+                        <div class="min-w-0">
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                                <div class="fw-semibold">@option.Title</div>
+                                <span class="badge @(option.Available && option.Enabled ? "text-bg-info" : "bg-white text-muted border")">
+                                    @if (!option.Available)
+                                    {
+                                        @:Unavailable
+                                    }
+                                    else
+                                    {
+                                        @(option.Enabled ? "Enabled" : "Disabled")
+                                    }
+                                </span>
+                            </div>
+                            <p class="text-muted small mb-0">@option.Description</p>
+                        </div>
+                    </div>
+
+                    @if (option.Available && option.Data is { } mainchainData)
+                    {
+                        var thresholdValue = mainchainData.Value<string>(MainchainSettlementData.ThresholdKey);
+                        var minSats = mainchainData.Value<long?>(MainchainSettlementData.MinSatsKey);
+                        var maxSats = mainchainData.Value<long?>(MainchainSettlementData.MaxSatsKey);
+                        var thresholdField = SettlementInputName.Field(option.Type, MainchainSettlementData.ThresholdKey);
+                        var thresholdInputId = $"{option.Type}{MainchainSettlementData.ThresholdKey}";
+                        var thresholdHelp = minSats is not null && maxSats is not null
+                            ? $"Leave blank to keep this option disabled. Allowed range: {minSats.Value:#,0}-{maxSats.Value:#,0} sats."
+                            : "Leave blank to keep this option disabled. Boltz limits could not be loaded.";
+
+                        <div class="row g-2 mt-3">
+                            <div class="col-md">
+                                <div class="input-group">
+                                    <input id="@thresholdInputId"
+                                           name="@thresholdField"
+                                           value="@thresholdValue"
+                                           class="form-control"
+                                           type="number"
+                                           min="@(minSats ?? 0)"
+                                           max="@maxSats"
+                                           step="1"
+                                           placeholder="Disabled" />
+                                    <span class="input-group-text">sats</span>
+                                </div>
+                                <div class="form-text">
+                                    @thresholdHelp
+                                </div>
+                            </div>
+                            <div class="col-md-auto d-flex gap-2 align-items-start">
+                                @if (option.Enabled)
+                                {
+                                    <button type="submit" name="command" value="@option.DisableCommand" class="btn btn-outline-secondary" formnovalidate>Disable</button>
+                                }
+                                <button type="submit" name="command" value="@option.SaveCommand" class="btn btn-primary">Save</button>
+                            </div>
+                        </div>
+                    }
+                    else if (!option.Available)
+                    {
+                        <div class="alert alert-warning small mb-0 mt-3" data-testid="@($"{optionSlug}-settlement-unavailable")">
+                            @option.UnavailableReason
+                        </div>
+                    }
+                </form>
+            }
+        </div>
+    </div>
 
     @if (Model.WalletType == WalletType.HD && Model.CanManagePrivateKeys)
     {

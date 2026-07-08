@@ -7,18 +7,8 @@ using Xunit.Abstractions;
 namespace NArk.E2E.Tests;
 
 /// <summary>
-/// One consolidated funded-wallet journey. Funding mints arkd credit
-/// notes and imports them via the plugin's in-process IContractService;
-/// arkd's indexer reports them as VTXOs and the IntentGenerationService
-/// (5s poll for the suite via BTCPAY_ARKINTENTPOLLSECONDS) redeems them
-/// into spendable VTXOs.
-///
-/// This is deliberately ONE test rather than four. Each independent
-/// note→redemption cycle contends for arkd's ~40s batch window; running
-/// four of them back-to-back on shared CI infra is flaky. Funding once
-/// (two notes, redeemed together) and asserting estimate-fees / send /
-/// payout sequentially against that one wallet removes the contention.
-/// Trade-off: coarser failure isolation, accepted for CI stability.
+/// Consolidated funded-wallet journey. Funding once avoids repeated arkd
+/// batch waits while still covering fee estimation, send, and payout approval.
 /// </summary>
 [Collection("Arkade Plugin Tests")]
 public class FundedWalletTests : PlaywrightBaseTest
@@ -33,7 +23,7 @@ public class FundedWalletTests : PlaywrightBaseTest
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task FundedWallet_FullJourney_FundEstimateSendPayout()
+    public async Task FundedWallet_FullJourney_FundEstimateSendApprovePayout()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -46,9 +36,7 @@ public class FundedWalletTests : PlaywrightBaseTest
         var walletId = await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 250_000);
         await FundWalletViaNoteAsync(_fixture.ServerTester!, walletId, 250_000);
 
-        // Wait on the real readiness signal — spendable coins, not the
-        // rendered balance (which counts a note VTXO before it's
-        // redeemed/spendable and yields a false positive).
+        // Spendability, not displayed balance, is the readiness signal.
         var outpoints = await PollForSpendableCoinsAsync(
             storeId, "ArkAddress", 40_000, TimeSpan.FromMinutes(5));
         Assert.NotEmpty(outpoints);
@@ -59,7 +47,7 @@ public class FundedWalletTests : PlaywrightBaseTest
         var recipientAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
         Assert.False(string.IsNullOrWhiteSpace(recipientAddr));
 
-        // 1) estimate-fees for an Ark→Ark transfer returns a fee field.
+        // Estimate fees for an Ark to Ark transfer.
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
         var feeResp = await Page.Context.APIRequest.PostAsync(
@@ -83,14 +71,8 @@ public class FundedWalletTests : PlaywrightBaseTest
                      feeJson.Value.TryGetProperty("estimatedFeeSats", out _);
         Assert.True(hasFee, $"estimate-fees response missing a fee field: {feeJson}");
 
-        // 2) Send 40k to the recipient via build-intent (uses one VTXO).
-        // Re-poll right before the POST: between the earlier poll and now
-        // we've created another store, browsed pages, and run estimate-fees
-        // — enough wall-clock that a batch settlement or VTXO state change
-        // can invalidate the originally captured outpoints. suggest-coins
-        // and build-intent occasionally disagree across that window
-        // ("No valid VTXOs selected" from build-intent's stricter check),
-        // so refresh outpoints to the live set just before submitting.
+        // Refresh outpoints immediately before build-intent; batch settlement
+        // can change coin state between the initial poll and the send.
         outpoints = await PollForSpendableCoinsAsync(
             storeId, "ArkAddress", 40_000, TimeSpan.FromMinutes(1));
         Assert.NotEmpty(outpoints);
@@ -115,9 +97,7 @@ public class FundedWalletTests : PlaywrightBaseTest
         var sendBody = await sendResp.TextAsync();
         Assert.DoesNotContain("No valid VTXOs selected", sendBody);
 
-        // 3) Payout: create a pull payment, claim to the recipient,
-        //    approve it, and assert the ArkAutomatedPayoutSender advances
-        //    it off AwaitingApproval. Uses the second funded VTXO.
+        // Approval should leave the payout waiting for manual payment.
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
         var pp = await client.CreatePullPayment(storeId, new CreatePullPaymentRequest
         {
@@ -135,19 +115,8 @@ public class FundedWalletTests : PlaywrightBaseTest
         Assert.Equal(PayoutState.AwaitingApproval, payout.State);
         await client.ApprovePayout(storeId, payout.Id, new ApprovePayoutRequest());
 
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(3);
-        PayoutState last = PayoutState.AwaitingApproval;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            var p = await client.GetStorePayout(storeId, payout.Id);
-            last = p.State;
-            if (last is PayoutState.AwaitingPayment or PayoutState.InProgress or PayoutState.Completed)
-                return;
-            if (last == PayoutState.Cancelled)
-                Assert.Fail("payout was cancelled instead of processed");
-            await Task.Delay(3_000);
-        }
-        Assert.Fail($"payout never advanced past AwaitingApproval (last: {last})");
+        var approved = await client.GetStorePayout(storeId, payout.Id);
+        Assert.Equal(PayoutState.AwaitingPayment, approved.State);
     }
 
 }

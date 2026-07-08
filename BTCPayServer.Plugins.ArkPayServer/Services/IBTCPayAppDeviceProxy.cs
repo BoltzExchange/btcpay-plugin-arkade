@@ -14,10 +14,9 @@ namespace BTCPayServer.Plugins.ArkPayServer.Services;
 /// gives the App-plugin impl a stable type to bind to, and lets this plugin
 /// resolve the transport with a soft fallback: if no
 /// <see cref="IBTCPayAppDeviceProxy"/> is registered, the plugin still loads
-/// and watch-only wallets remain usable read-only — signing-dependent
-/// operations fail with a clear "no remote signer registered" message,
-/// scoped to the moment a signer is actually requested rather than at
-/// container build time.
+/// and wallets without local signing material remain readable. Signing-dependent
+/// operations fail with a clear "no remote signer registered" message scoped to
+/// the moment a signer is actually requested rather than at container build time.
 /// </remarks>
 public interface IBTCPayAppDeviceProxy : IRemoteSignerTransport
 {

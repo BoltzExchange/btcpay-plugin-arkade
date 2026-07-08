@@ -1,25 +1,31 @@
+using BTCPayServer;
+using BTCPayServer.Client;
+using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
+using BTCPayServer.Payments;
+using BTCPayServer.Services.Invoices;
+using BTCPayServer.Services.Stores;
+using BTCPayServer.Services.Wallets;
 using BTCPayServer.Tests;
+using System.Text.Json;
+using CliWrap;
+using CliWrap.Buffered;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using NArk.Core.Contracts;
 using NArk.Core.Services;
+using NArk.Swaps.Abstractions;
+using NArk.Swaps.Models;
+using NArk.Tests.End2End.Common;
 using NBitcoin;
 using NBitcoin.DataEncoders;
 using NBitcoin.Secp256k1;
+using Xunit;
 using Xunit.Abstractions;
 
 namespace NArk.E2E.Tests;
 
-/// <summary>
-/// Base for Arkade plugin Playwright tests. Inherits BTCPay's
-/// <see cref="UnitTestBase"/> so we can call <c>CreateServerTester</c>
-/// via the shared <see cref="SharedPluginTestFixture"/>, then layers
-/// per-test browser/page management on top.
-///
-/// Modelled directly on rockstardev/BTCPayServerPlugins.RockstarDev —
-/// that repo is the canonical reference for running plugin E2E against
-/// a real BTCPay process driven by BTCPay's own ServerTester.
-/// </summary>
+/// <summary>Playwright helpers for Arkade plugin E2E tests.</summary>
 public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
 {
     protected PlaywrightBaseTest(ITestOutputHelper helper) : base(helper)
@@ -36,6 +42,9 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     private static bool IsRunningInCI =>
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")) ||
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"));
+
+    private static readonly SemaphoreSlim _arkdCliSetupLock = new(1, 1);
+    private static bool _arkdCliReady;
 
     /// <summary>Starts a Chromium browser and opens a page pointed at the running BTCPay.</summary>
     protected async Task InitializePlaywright(ServerTester serverTester)
@@ -80,11 +89,8 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         var trimmedBase = ServerUri.AbsoluteUri.TrimEnd('/');
         var trimmedRel = relativeUrl.StartsWith('/') ? relativeUrl : '/' + relativeUrl;
 
-        // BTCPay's Arkade overview page holds long-polling XHRs (VTXO
-        // subscription, stream events) that saturate Chromium's 6-connection
-        // per-origin pool. Subsequent same-origin navigations then hang
-        // waiting for a connection slot. Routing through about:blank first
-        // tears those down. Cheap (~50ms).
+        // Overview opens long-polling requests; about:blank clears them
+        // before the next same-origin navigation.
         if (Page.Url.StartsWith(trimmedBase, StringComparison.Ordinal))
         {
             await Page.GotoAsync("about:blank",
@@ -121,22 +127,39 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         name ??= "ArkadeStore" + RandomUtils.GetUInt64();
         await Page.FillAsync("#Name", name);
         await Page.ClickAsync("#Create");
-        // BTCPay redirects to /stores/{id}/ (onboarding page for fresh
-        // stores). The General settings page exposes the store id in #Id;
-        // BTCPay's sidebar nav items use the convention
-        // #menu-item-{StoreNavPages enum value} — see
-        // BTCPayServer.Tests.PlaywrightTester.GoToStore for the reference.
+        // The General settings page exposes the generated store id in #Id.
         await Page.ClickAsync("#menu-item-General");
         return await Page.InputValueAsync("#Id");
     }
 
-    /// <summary>
-    /// Creates a store and sets up its Arkade wallet through the plugin's
-    /// setup wizard. Pass <c>null</c> to take the "Create a new wallet" path;
-    /// pass any non-null string (nsec, BIP-39 seed phrase, or existing
-    /// wallet-id) to take the import path. Returns the storeId once the wizard
-    /// has redirected away from /initial-setup.
-    /// </summary>
+    protected static Task ConfigureBtcOnchainWalletAsync(ServerTester serverTester, string storeId) =>
+        ConfigureBtcOnchainWalletAsync(serverTester.PayTester.ServiceProvider, storeId);
+
+    protected static async Task ConfigureBtcOnchainWalletAsync(IServiceProvider services, string storeId)
+    {
+        var storeRepository = services.GetRequiredService<StoreRepository>();
+        var handlers = services.GetRequiredService<PaymentMethodHandlerDictionary>();
+        var networkProvider = services.GetRequiredService<BTCPayNetworkProvider>();
+        var walletProvider = services.GetRequiredService<BTCPayWalletProvider>();
+
+        var network = networkProvider.GetNetwork<BTCPayNetwork>("BTC")!;
+        var xpub = new ExtKey().Neuter().GetWif(network.NBitcoinNetwork);
+        var derivation = DerivationSchemeSettings.Parse($"{xpub}-[legacy]", network);
+        var wallet = walletProvider.GetWallet("BTC") ??
+            throw new InvalidOperationException("BTC wallet is not available.");
+        await wallet.TrackAsync(derivation.AccountDerivation);
+
+        var store = await storeRepository.FindStore(storeId) ??
+            throw new InvalidOperationException($"Store {storeId} was not found.");
+        var paymentMethodId = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
+        store.SetPaymentMethodConfig(handlers[paymentMethodId], derivation);
+        var storeBlob = store.GetStoreBlob();
+        storeBlob.SetExcluded(paymentMethodId, false);
+        store.SetStoreBlob(storeBlob);
+        await storeRepository.UpdateStore(store);
+    }
+
+    /// <summary>Creates a store and completes Arkade initial setup.</summary>
     protected async Task<string> CreateStoreWithArkWalletAsync(string? walletInput = null)
     {
         ArgumentNullException.ThrowIfNull(Page);
@@ -149,19 +172,11 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
 
         if (walletInput is null)
         {
-            // The submit buttons sit inside Bootstrap collapses; DOM clicks
-            // avoid racing Playwright's actionability checks against the
-            // collapse animation while preserving normal form submission.
-            await Page.EvaluateAsync(
-                "document.querySelector('[data-testid=\"create-wallet-btn\"]').click()");
+            await SubmitCreateWalletSetupAsync();
         }
         else
         {
-            await Page.EvaluateAsync(
-                "(v) => { var el = document.querySelector('[data-testid=\"nsec-input\"]'); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }",
-                walletInput);
-            await Page.EvaluateAsync(
-                "document.querySelector('[data-testid=\"import-wallet-btn\"]').click()");
+            await SubmitImportWalletSetupAsync(walletInput);
         }
 
         // Generous timeout because the first wallet creation in a session
@@ -171,11 +186,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
             url => !url.Contains("/initial-setup"),
             new PageWaitForURLOptions { Timeout = 60_000 });
 
-        // Wait for the landing page (typically /overview) to be DOM-ready so
-        // the next navigation isn't queued behind an in-flight load. The
-        // Arkade overview kicks off VTXO sync XHRs which can keep the page's
-        // network busy indefinitely — explicitly wait for DOMContentLoaded
-        // rather than the full `load` event.
+        // Avoid waiting for overview long-polling requests to go idle.
         await Page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         return storeId;
@@ -184,14 +195,44 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     protected Task<string> CreateStoreWithSingleKeyWalletAsync() =>
         CreateStoreWithArkWalletAsync(GenerateRandomNsec());
 
+    protected async Task OpenCreateWalletSettlementStepAsync()
+    {
+        ArgumentNullException.ThrowIfNull(Page);
+
+        await Page.ClickAsync("[data-testid='hd-wallet-option']");
+        await Page.WaitForSelectorAsync("#createNew [data-settlement-step]:not(.d-none)");
+    }
+
+    protected async Task SubmitCreateWalletSetupAsync()
+    {
+        ArgumentNullException.ThrowIfNull(Page);
+
+        await OpenCreateWalletSettlementStepAsync();
+        await Page.ClickAsync("#createNew [data-testid='create-wallet-btn']");
+    }
+
+    protected async Task OpenImportWalletSettlementStepAsync(string walletInput)
+    {
+        ArgumentNullException.ThrowIfNull(Page);
+
+        await Page.ClickAsync("[data-testid='legacy-wallet-option']");
+        await Page.WaitForSelectorAsync("#importExisting.show [data-testid='nsec-input']");
+        await Page.FillAsync("#importExisting [data-testid='nsec-input']", walletInput);
+        await Page.ClickAsync("#importExisting [data-testid='import-wallet-next-btn']");
+        await Page.WaitForSelectorAsync("#importExisting [data-settlement-step]:not(.d-none)");
+    }
+
+    protected async Task SubmitImportWalletSetupAsync(string walletInput)
+    {
+        ArgumentNullException.ThrowIfNull(Page);
+
+        await OpenImportWalletSettlementStepAsync(walletInput);
+        await Page.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
+    }
+
     private static string? _resolvedArkdContainer;
 
-    /// <summary>
-    /// Resolves the arkd container name. nigiri's own lib/env.sh names it
-    /// "arkd" when a custom ARKD_IMAGE is supplied (typical local dev) and
-    /// "ark" for the built-in image (CI). Probe both with `docker inspect`
-    /// and cache the first that exists rather than hardcoding either.
-    /// </summary>
+    /// <summary>Returns the arkd container used by the active regtest stack.</summary>
     protected static async Task<string> ResolveArkdContainerAsync()
     {
         if (_resolvedArkdContainer is not null) return _resolvedArkdContainer;
@@ -208,11 +249,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
             "Could not find an arkd container (tried 'arkd' and 'ark'). Is the nigiri stack up?");
     }
 
-    /// <summary>
-    /// Mint a credit note via the arkd admin CLI. The container name is
-    /// resolved dynamically (see <see cref="ResolveArkdContainerAsync"/>);
-    /// the in-container binary is always <c>arkd</c> regardless of name.
-    /// </summary>
+    /// <summary>Mints a credit note via the arkd admin CLI.</summary>
     protected static async Task<string> CreateArkNoteAsync(long amountSats)
     {
         var container = await ResolveArkdContainerAsync();
@@ -232,14 +269,139 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return result.StandardOutput.Trim();
     }
 
-    /// <summary>
-    /// Reads the ASP.NET antiforgery token rendered into the current page
-    /// as <c>&lt;input name="__RequestVerificationToken" value="..." /&gt;</c>.
-    /// BTCPay's antiforgery filter accepts it via the
-    /// <c>RequestVerificationToken</c> header for AJAX requests.
-    /// Returns null when no token is present (e.g., on /register before
-    /// login).
-    /// </summary>
+    /// <summary>Initializes and funds the ark CLI for checkout cheat-mode sends.</summary>
+    protected async Task EnsureArkdCliReadyAsync()
+    {
+        if (_arkdCliReady) return;
+        await _arkdCliSetupLock.WaitAsync();
+        try
+        {
+            if (_arkdCliReady) return;
+
+            var container = await ResolveArkdContainerAsync();
+
+            var configProbe = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", container, "ark", "config" })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+            var needsInit =
+                !configProbe.IsSuccess ||
+                configProbe.StandardError.Contains("not initialized", StringComparison.OrdinalIgnoreCase);
+            if (needsInit)
+            {
+                var explorerUrl = Environment.GetEnvironmentVariable("ARKADE_CHEAT_ARK_EXPLORER") ??
+                                  "http://mempool_web/api";
+                var initResult = await Cli.Wrap("docker")
+                    .WithArguments(new[]
+                    {
+                        "exec", container, "ark", "init",
+                        "--server-url", "http://localhost:7070",
+                        "--explorer", explorerUrl,
+                        "--password", "secret"
+                    })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync();
+                if (!initResult.IsSuccess)
+                    throw new InvalidOperationException(
+                        $"ark init failed (exit={initResult.ExitCode}): " +
+                        $"stderr={initResult.StandardError.Trim()}, " +
+                        $"stdout={initResult.StandardOutput.Trim()}");
+            }
+
+            if (await GetArkdOffchainSatsAsync(container) >= 10_000)
+            {
+                _arkdCliReady = true;
+                return;
+            }
+
+            var receiveResult = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", container, "ark", "receive" })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+            if (!receiveResult.IsSuccess)
+                throw new InvalidOperationException(
+                    $"ark receive failed: {receiveResult.StandardError.Trim()}");
+            using var receiveDoc = JsonDocument.Parse(receiveResult.StandardOutput);
+            var boardingAddr = receiveDoc.RootElement.GetProperty("boarding_address").GetString()
+                ?? throw new InvalidOperationException("ark receive returned no boarding_address");
+
+            var faucetResult = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "sendtoaddress", boardingAddr, "1" })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+            if (!faucetResult.IsSuccess)
+                throw new InvalidOperationException(
+                    $"bitcoin-cli sendtoaddress {boardingAddr} failed: {faucetResult.StandardError.Trim()}");
+
+            var mineResult = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "6" })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+            if (!mineResult.IsSuccess)
+                throw new InvalidOperationException(
+                    $"bitcoin-cli -generate 6 failed: {mineResult.StandardError.Trim()}");
+
+            const int settleAttempts = 5;
+            for (var attempt = 1; attempt <= settleAttempts; attempt++)
+            {
+                var settleResult = await Cli.Wrap("docker")
+                    .WithArguments(new[] { "exec", container, "ark", "settle", "--password", "secret" })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync();
+                if (settleResult.IsSuccess) break;
+
+                var fundingStillSettling = settleResult.StandardOutput.Contains(
+                    "fees (0) exceed total amount (0)", StringComparison.Ordinal);
+                if (!fundingStillSettling || attempt == settleAttempts)
+                    throw new InvalidOperationException(
+                        $"ark settle failed (exit={settleResult.ExitCode}, attempt={attempt}/{settleAttempts}): " +
+                        $"stderr={settleResult.StandardError.Trim()}, " +
+                        $"stdout={settleResult.StandardOutput.Trim()}");
+
+                await Task.Delay(TimeSpan.FromSeconds(2));
+                await Cli.Wrap("docker")
+                    .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "1" })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync();
+            }
+
+            if (await GetArkdOffchainSatsAsync(container) < 10_000)
+                throw new InvalidOperationException(
+                    "ark settle reported success but off-chain balance still under threshold; " +
+                    "arkd may have delayed the commitment tx.");
+
+            _arkdCliReady = true;
+        }
+        finally
+        {
+            _arkdCliSetupLock.Release();
+        }
+    }
+
+    private static async Task<long> GetArkdOffchainSatsAsync(string container)
+    {
+        var balResult = await Cli.Wrap("docker")
+            .WithArguments(new[] { "exec", container, "ark", "balance" })
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
+        if (!balResult.IsSuccess) return 0;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(balResult.StandardOutput);
+            if (doc.RootElement.TryGetProperty("offchain_balance", out var off) &&
+                off.TryGetProperty("total", out var total) &&
+                total.TryGetInt64(out var sats))
+                return sats;
+        }
+        catch (JsonException)
+        {
+            return 0;
+        }
+        return 0;
+    }
+
+    /// <summary>Reads the current page's ASP.NET antiforgery token.</summary>
     protected async Task<string?> GetAntiforgeryTokenAsync()
     {
         ArgumentNullException.ThrowIfNull(Page);
@@ -248,12 +410,76 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return await locator.GetAttributeAsync("value");
     }
 
-    /// <summary>
-    /// Generates a valid bech32-encoded nsec (Nostr private key) from a
-    /// fresh random secp256k1 scalar. Importing this through the wizard
-    /// yields a SingleKey wallet with a deterministic Arkade address that
-    /// the overview page renders.
-    /// </summary>
+    protected async Task PayArkadeInvoiceAsync(
+        BTCPayServerClient client,
+        string storeId,
+        long amountSats)
+    {
+        var invoice = await client.CreateInvoice(storeId, new CreateInvoiceRequest
+        {
+            Amount = amountSats,
+            Currency = "SATS",
+            Checkout = new InvoiceDataBase.CheckoutOptions
+            {
+                PaymentMethods = ["ARKADE"]
+            }
+        });
+        Assert.False(string.IsNullOrEmpty(invoice.Id));
+
+        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
+        var token = (await GetAntiforgeryTokenAsync()) ?? "";
+        var payResp = await Page!.Context.APIRequest.PostAsync(
+            new Uri(ServerUri!, $"/i/{invoice.Id}/test-payment").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["Content-Type"] = "application/x-www-form-urlencoded",
+                    ["RequestVerificationToken"] = token
+                },
+                Data = $"Amount={amountSats}&CryptoCode=SATS&PaymentMethodId=ARKADE"
+            });
+
+        var payBody = await payResp.TextAsync();
+        Assert.True(payResp.Ok,
+            $"POST /i/{invoice.Id}/test-payment returned {payResp.Status}: {payBody}");
+    }
+
+    protected static async Task<string> GetNewRegtestBitcoinAddressAsync()
+    {
+        var address = (await DockerHelper.Exec("bitcoin",
+            [
+                "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123",
+                "getnewaddress"
+            ])).Trim();
+        if (string.IsNullOrWhiteSpace(address))
+            throw new InvalidOperationException("bitcoin-cli getnewaddress returned empty output.");
+        return address;
+    }
+
+    protected static async Task<ArkSwap> WaitForChainSwapAsync(
+        IServiceProvider services,
+        string walletId,
+        TimeSpan? timeout = null)
+    {
+        var swapStorage = services.GetRequiredService<ISwapStorage>();
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromMinutes(1));
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var swap = (await swapStorage.GetSwaps(
+                    walletIds: [walletId],
+                    swapTypes: [ArkSwapType.ChainArkToBtc]))
+                .FirstOrDefault(s => s.ExpectedAmount > 0);
+            if (swap is not null)
+                return swap;
+
+            await Task.Delay(2_000);
+        }
+
+        throw new TimeoutException($"No ChainArkToBtc swap was recorded for wallet {walletId}.");
+    }
+
+    /// <summary>Generates a valid random nsec private key for wallet imports.</summary>
     protected static string GenerateRandomNsec()
     {
         Span<byte> keyBytes = stackalloc byte[32];
@@ -269,10 +495,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return encoder.EncodeData(keyBytes.ToArray(), Bech32EncodingType.BECH32);
     }
 
-    /// <summary>
-    /// Resolves the BTCPay store's configured Arkade walletId by scraping
-    /// the truncate-center element on the overview page.
-    /// </summary>
+    /// <summary>Reads the store's configured Arkade wallet id from overview.</summary>
     protected async Task<string?> GetStoreWalletIdAsync(string storeId)
     {
         ArgumentNullException.ThrowIfNull(Page);
@@ -280,13 +503,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return await Page.GetAttributeAsync(".truncate-center-id", "data-text");
     }
 
-    /// <summary>
-    /// Funds a wallet by minting an arkd credit note and importing it as
-    /// an <see cref="ArkNoteContract"/> through the plugin's in-process
-    /// <see cref="IContractService"/> (resolved from the running BTCPay's
-    /// service provider). arkd's indexer then reports the note as a VTXO;
-    /// the redemption intent is generated on the suite's shortened poll.
-    /// </summary>
+    /// <summary>Mints an arkd note and imports it into the plugin wallet.</summary>
     protected async Task FundWalletViaNoteAsync(
         IServiceProvider serviceProvider, string walletId, long amountSats)
     {
@@ -395,11 +612,8 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 var outpoints = await SuggestOutpointsAsync(storeId, destinationType, amountSats);
                 if (outpoints.Count > 0) return outpoints;
             }
-            // Transient "coins not ready yet" responses: a just-redeemed
-            // note VTXO is briefly absent ("No spendable coins") and, for
-            // the Lightning path specifically, briefly classified
-            // recoverable/swept ("No non-recoverable coins available")
-            // until it settles. Both clear on the next batch — keep polling.
+            // Freshly redeemed note VTXOs can be absent or recoverable until
+            // the next batch settles.
             catch (InvalidOperationException ex) when (
                 ex.Message.Contains("No spendable coins") ||
                 ex.Message.Contains("non-recoverable coins"))
@@ -412,11 +626,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
             $"Store {storeId} had no spendable coins within the wait window (last: {lastError ?? "empty selection"}).");
     }
 
-    /// <summary>
-    /// Calls POST /suggest-coins for the given destination type and amount
-    /// and returns the server-picked outpoints (txid:vout strings). Throws
-    /// if the endpoint reports an error (e.g. no spendable coins).
-    /// </summary>
+    /// <summary>Calls POST /suggest-coins and returns selected outpoints.</summary>
     protected async Task<List<string>> SuggestOutpointsAsync(
         string storeId, string destinationType, long amountSats)
     {

@@ -139,7 +139,12 @@ public class ArkPayoutHandler : IPayoutHandler, IHasNetwork, IActiveScriptsProvi
             var res = parseResult.Value.Object.ToObject<ArkPayoutProof>(
                 JsonSerializer.Create(_jsonSerializerSettings.GetSerializer(payoutMethodId))
             )!;
-            res.Link =  ArkadeLinkHelper.GetAddressLink(_arkNetworkConfig, ArkAddress.Parse(payout.DedupId).ToString());
+            if (!string.IsNullOrWhiteSpace(payout.DedupId) &&
+                ArkAddress.TryParse(payout.DedupId, out var arkAddress) &&
+                arkAddress is not null)
+            {
+                res.Link = ArkadeLinkHelper.GetAddressLink(_arkNetworkConfig, arkAddress.ToString());
+            }
             return res;
         }
 
