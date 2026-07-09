@@ -28,7 +28,7 @@ public class FundedWalletTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         // Fund with two notes so a single redemption batch yields two
         // independent VTXOs — the send and the payout each take one
@@ -42,10 +42,8 @@ public class FundedWalletTests : PlaywrightBaseTest
         Assert.NotEmpty(outpoints);
 
         // Recipient store — just to harvest a valid Arkade address.
-        var recipientStoreId = await CreateStoreWithSingleKeyWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{recipientStoreId}/overview");
-        var recipientAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
-        Assert.False(string.IsNullOrWhiteSpace(recipientAddr));
+        var recipientStoreId = await CreateStoreWithArkWalletAsync();
+        var recipientAddr = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, recipientStoreId);
 
         // Estimate fees for an Ark to Ark transfer.
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");

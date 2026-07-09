@@ -211,9 +211,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("AccountDescriptor")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("TODO_MIGRATION");
+                        .HasColumnType("text");
 
                     b.Property<int>("LastUsedIndex")
                         .ValueGeneratedOnAdd()

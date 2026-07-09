@@ -20,5 +20,8 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
         {
             opts.Schema = "BTCPayServer.Plugins.Boltz.Arkade";
         });
+        modelBuilder.Entity<ArkWalletEntity>()
+            .Property(w => w.AccountDescriptor)
+            .HasDefaultValue(null);
     }
 }

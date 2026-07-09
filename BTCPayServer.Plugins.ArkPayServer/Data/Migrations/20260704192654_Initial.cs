@@ -80,7 +80,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     Wallet = table.Column<string>(type: "text", nullable: true),
                     WalletDestination = table.Column<string>(type: "text", nullable: true),
                     WalletType = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
-                    AccountDescriptor = table.Column<string>(type: "text", nullable: true, defaultValue: "TODO_MIGRATION"),
+                    AccountDescriptor = table.Column<string>(type: "text", nullable: true),
                     LastUsedIndex = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     Metadata = table.Column<string>(type: "text", nullable: true)
                 },

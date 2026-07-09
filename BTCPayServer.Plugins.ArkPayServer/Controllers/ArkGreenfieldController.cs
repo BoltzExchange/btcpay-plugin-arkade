@@ -56,7 +56,6 @@ public class ArkGreenfieldController(
     ISpendingService arkadeSpender,
     IFeeEstimator feeEstimator,
     IContractService contractService,
-    NArk.Core.Recovery.ISingleKeyDefaultEnsurer singleKeyDefaultEnsurer,
     IBitcoinBlockchain bitcoinTimeChainProvider,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
@@ -86,29 +85,12 @@ public class ArkGreenfieldController(
         var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
         var signerAvailable = await walletProvider.GetAddressProviderAsync(config.WalletId!, cancellationToken) != null;
 
-        string? defaultAddress = null;
-        if (wallet?.WalletType == WalletType.SingleKey)
-        {
-            try
-            {
-                var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-                var descriptor = OutputDescriptor.Parse(wallet.AccountDescriptor, terms.Network);
-                var defaultContract = new ArkPaymentContract(terms.SignerKey, terms.UnilateralExit, descriptor);
-                defaultAddress = defaultContract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
-            }
-            catch
-            {
-                // Operator unavailable — skip default address
-            }
-        }
-
         return Ok(new ArkWalletData
         {
             WalletId = config.WalletId!,
-            WalletType = (wallet?.WalletType ?? WalletType.SingleKey).ToString(),
+            WalletType = (wallet?.WalletType ?? WalletType.HD).ToString(),
             SignerAvailable = signerAvailable,
             IsOwnedByStore = config.GeneratedByStore,
-            DefaultAddress = defaultAddress,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
             MinBoardingAmountSats = config.MinBoardingAmountSats,
@@ -141,14 +123,6 @@ public class ArkGreenfieldController(
             {
                 await walletStorage.UpsertWallet(walletInfo, updateIfExists: true, cancellationToken);
 
-                if (walletInfo.WalletType == WalletType.SingleKey)
-                {
-                    // Delegate to the SDK's ensurer (destination-insensitive, unlike the
-                    // SendToSelf path); the SDK ContractReconciliationService also maintains
-                    // this default across signer rotation.
-                    await singleKeyDefaultEnsurer.EnsureDefaultAsync(walletInfo.Id, cancellationToken);
-                }
-
                 walletId = walletInfo.Id;
             }
 
@@ -180,7 +154,7 @@ public class ArkGreenfieldController(
             return Ok(new ArkWalletSetupResponse
             {
                 WalletId = walletId!,
-                WalletType = (walletInfo?.WalletType ?? WalletType.SingleKey).ToString(),
+                WalletType = (walletInfo?.WalletType ?? WalletType.HD).ToString(),
                 IsNewWallet = isNew,
                 LightningEnabled = lightningEnabled,
                 Mnemonic = mnemonic
@@ -342,7 +316,7 @@ public class ArkGreenfieldController(
                 config!.WalletId!,
                 NextContractPurpose.Boarding,
                 ContractActivityState.AwaitingFundsBeforeDeactivate,
-                metadata: new Dictionary<string, string> { ["Source"] = "manual-boarding" },
+                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
                 cancellationToken: cancellationToken);
             model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
 
@@ -1318,23 +1292,6 @@ public class ArkGreenfieldController(
             return (walletInfo, walletInfo.Id, true, mnemonicStr);
         }
 
-        // nsec import
-        if (wallet.StartsWith("nsec", StringComparison.OrdinalIgnoreCase))
-        {
-            // Check if wallet already exists
-            var candidateIds = new[] { WalletFactory.GetOutputDescriptorFromNsec(wallet) }
-                .Concat(WalletFactory.GetAlternateWalletIdsFromNsec(wallet));
-            foreach (var candidateId in candidateIds)
-            {
-                var existing = await walletStorage.GetWalletById(candidateId, cancellationToken);
-                if (existing != null)
-                    return (null, candidateId, false, null);
-            }
-
-            var walletInfo = await WalletFactory.CreateWallet(wallet, destination: null, serverInfo, cancellationToken);
-            return (walletInfo, walletInfo.Id, true, null);
-        }
-
         // BIP-39 mnemonic (12 or 24 words)
         var words = wallet.Trim().Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
         if (words.Length is 12 or 24)
@@ -1417,7 +1374,7 @@ public class ArkGreenfieldController(
         var boardingEntity = existingContracts
             .FirstOrDefault(c =>
                 c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") == "manual-boarding");
+                c.Metadata?.GetValueOrDefault("Source") == "manual");
 
         if (boardingEntity == null) return null;
 

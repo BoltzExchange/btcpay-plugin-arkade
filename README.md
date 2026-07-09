@@ -41,7 +41,7 @@ BTCPay Server
     ├── BoardingTransactionListener# Watches on-chain boarding UTXOs via NBXplorer
     ├── ArkadeSpendingService      # Sends payments (payouts, refunds)
     └── NNark (submodule)          # .NET Arkade SDK
-        ├── NArk.Core              # Wallet, VTXO logic, HD/SingleKey signers
+        ├── NArk.Core              # Wallet, VTXO logic, HD signing
         ├── NArk.Storage.EfCore    # PostgreSQL persistence (EF Core)
         └── NArk.Swaps             # Boltz submarine/reverse swap client
 ```
@@ -97,9 +97,10 @@ The setup script will:
 
 1. Navigate to your BTCPay store → **Settings → Arkade**
 2. Enter your **Arkade server URL** (e.g. `https://arkd.yourdomain.com`)
-3. Import your wallet:
-   - **HD Wallet**: paste a BIP-39 mnemonic (12 or 24 words)
-   - **SingleKey Wallet**: paste a Nostr `nsec` private key
+3. Create or import your wallet:
+   - Generate a new hot wallet
+   - Paste a BIP-39 mnemonic (12 or 24 words)
+   - Paste a watch-only Taproot account descriptor
 
 ### 2. Configure Payment Methods
 
@@ -126,17 +127,10 @@ The setup script will:
 - Supports boarding addresses (requires HD derivation)
 - Recommended for merchants
 
-### SingleKey Wallet (Nostr nsec)
-- Single static key — all contracts derive from one key
-- Simpler setup
-- Boarding addresses not supported
-- Suitable for lightweight deployments
-
 ### Watch-Only Wallet (Account Descriptor)
 - No signing material stored on the server — the merchant pastes a
-  Taproot account descriptor (e.g. `tr([fingerprint/86'/0'/0']xpub.../0/*)`
-  for HD style, or `tr(pubkey)` for single-key style) and the plugin
-  observes the wallet by deriving addresses and watching VTXOs.
+  Taproot account descriptor (e.g. `tr([fingerprint/86'/0'/0']xpub.../0/*)`)
+  and the plugin observes the wallet by deriving addresses and watching VTXOs.
 - Read-only operations work out of the box: receive, balance display,
   invoice payment detection, contract listing.
 - **Signing-dependent operations** (batch participation, unilateral
@@ -164,7 +158,7 @@ The setup script will:
 - Sub-dust toggle for micro-payments
 
 ### Wallet Management
-- Import via mnemonic or nsec
+- Create a new hot wallet or import via mnemonic/account descriptor
 - View balance in BTC with show/hide privacy toggle
 - Clear wallet configuration without losing on-chain funds
 - Contract sync on import
@@ -284,7 +278,7 @@ At any time, a user can exit to on-chain Bitcoin without the operator's cooperat
 - The plugin uses POST redirects for private key display (never URL query params)
 - All wallet state is stored in your own PostgreSQL database
 
-**Never share your mnemonic or nsec with anyone, including Ark Labs.**
+**Never share your mnemonic or wallet seed with anyone, including Ark Labs.**
 
 ---
 

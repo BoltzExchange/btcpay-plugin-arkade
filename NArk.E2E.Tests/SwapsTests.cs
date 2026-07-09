@@ -39,7 +39,7 @@ public class SwapsTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
         var walletId = await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 200_000);
 
         // BOLT11 on the nigiri "lnd" node Boltz can route to.
@@ -47,10 +47,11 @@ public class SwapsTests : PlaywrightBaseTest
         Assert.False(string.IsNullOrWhiteSpace(bolt11));
 
         // Wait on swap-eligible (LightningInvoice = non-recoverable) coins
-        // being actually spendable, not the rendered balance — same
-        // readiness-signal fix as the funded journey.
+        // being actually spendable, not the rendered balance. In the full
+        // shared suite, note redemption can take longer than the generic
+        // spendability timeout while earlier batch work drains.
         var outpoints = await PollForSpendableCoinsAsync(
-            storeId, "LightningInvoice", 20_000, TimeSpan.FromMinutes(5));
+            storeId, "LightningInvoice", 20_000, TimeSpan.FromMinutes(10));
         Assert.NotEmpty(outpoints);
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");

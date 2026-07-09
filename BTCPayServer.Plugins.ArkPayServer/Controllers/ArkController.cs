@@ -81,7 +81,6 @@ public class ArkController(
     ISpendingService arkadeSpender,
     IFeeEstimator feeEstimator,
     IContractService contractService,
-    NArk.Core.Recovery.ISingleKeyDefaultEnsurer singleKeyDefaultEnsurer,
     IBitcoinBlockchain bitcoinTimeChainProvider,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
@@ -175,15 +174,6 @@ public class ArkController(
 
                     await walletStorage.UpsertWallet(wallet, updateIfExists: true, HttpContext.RequestAborted);
 
-                    if (wallet.WalletType == WalletType.SingleKey)
-                    {
-                        // Synchronous default-contract creation at setup (no regression vs. the
-                        // prior inline DeriveContract), but the "how" now lives in the SDK. The
-                        // persisted Default is thereafter maintained across signer rotation by
-                        // the SDK's ContractReconciliationService (started via ArkHostedLifecycle).
-                        await singleKeyDefaultEnsurer.EnsureDefaultAsync(wallet.Id, HttpContext.RequestAborted);
-                    }
-
                     walletSettings = walletSettings with { WalletId = wallet.Id };
                 }
                 catch (Exception ex)
@@ -252,8 +242,8 @@ public class ArkController(
     /// <summary>
     /// Starts unified wallet recovery for <paramref name="walletId"/> on a background
     /// thread (a gap-limit scan polls arkd per index), tracking status for the overview.
-    /// Discovers contracts (incl. legacy deprecated-signer scripts) + the derivation
-    /// index, restores swaps, finalizes pending txs and resyncs offchain funds, then
+    /// Discovers contracts and the derivation index, restores swaps, finalizes
+    /// pending txs and resyncs offchain funds, then
     /// syncs boarding (on-chain) UTXOs. <c>IWalletRecoveryService</c> is only registered
     /// when swaps (Boltz) are configured; without it this degrades to a boarding-only sync.
     /// </summary>
@@ -332,19 +322,6 @@ public class ArkController(
         }
 
         var signerAvailable = await walletProvider.GetAddressProviderAsync(config.WalletId!, cancellationToken) != null;
-
-        // Get the default/active contract address
-        string? defaultAddress = null;
-        if (wallet?.WalletType == WalletType.SingleKey)
-        {
-            // SingleKey: compute the deterministic default address directly from the wallet key.
-            // This is recomputed from the CURRENT signer, which matches the persisted Default
-            // maintained by the SDK ContractReconciliationService — so display == watched holds.
-            var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-            var descriptor = OutputDescriptor.Parse(wallet.AccountDescriptor, terms.Network);
-            var defaultContract = new ArkPaymentContract(terms.SignerKey, terms.UnilateralExit, descriptor);
-            defaultAddress = defaultContract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
-        }
 
         var arkOperatorStatus = await arkOperatorHealth.GetStatusAsync(cancellationToken);
 
@@ -514,14 +491,13 @@ public class ArkController(
             Balances = balances,
             WalletId = config.WalletId,
             SignerAvailable = signerAvailable,
-            DefaultAddress = defaultAddress,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
             MinBoardingAmountSats = config.MinBoardingAmountSats,
             WalletBackedUp = config.WalletBackedUp ?? true,
             HasCurrentWalletFunds = totalVtxoCount > 0,
             Wallet = wallet?.Secret,
-            WalletType = wallet?.WalletType ?? WalletType.SingleKey,
+            WalletType = wallet?.WalletType ?? WalletType.HD,
             CanManagePrivateKeys = canManagePrivateKeys,
             RecoveryStatus = config.WalletId is { } recoveryWalletId ? recoveryStatusTracker.Get(recoveryWalletId) : null,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
@@ -588,7 +564,7 @@ public class ArkController(
 
         return View("Settings", new StoreSettingsViewModel
         {
-            WalletType = wallet?.WalletType ?? WalletType.SingleKey,
+            WalletType = wallet?.WalletType ?? WalletType.HD,
             CanManagePrivateKeys = canManagePrivateKeys,
             IsLightningEnabled = IsArkadeLightningEnabled(),
             Form = new StoreSettingsFormModel
@@ -745,7 +721,7 @@ public class ArkController(
         var boardingEntity = existingContracts
             .FirstOrDefault(c =>
                 c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") is "manual" or "manual-boarding");
+                c.Metadata?.GetValueOrDefault("Source") == "manual");
 
         if (boardingEntity == null) return null;
 
@@ -755,13 +731,13 @@ public class ArkController(
     }
 
     /// <summary>
-    /// Legacy redirect - SpendOverview now redirects to Send wizard.
+    /// The transfer route redirects to the Send wizard.
     /// </summary>
     [HttpGet("stores/{storeId}/spend")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public IActionResult SpendOverview(string storeId, string[]? destinations, string? vtxoOutpoints)
     {
-        // Convert old parameters to new format
+        // Preserve selected outputs/destinations when entering the Send wizard.
         var vtxos = vtxoOutpoints;
         var destinationsParam = destinations != null && destinations.Length > 0
             ? string.Join(",", destinations)
@@ -3026,22 +3002,6 @@ public class ArkController(
         if (string.IsNullOrWhiteSpace(wallet))
             return new TemporaryWalletSettings(GenerateWallet(), null, true, true);
 
-        if (wallet.StartsWith("nsec", StringComparison.InvariantCultureIgnoreCase))
-        {
-            // Check all possible wallet ID formats: tr(compressed), raw compressed, raw xonly, tr(xonly).
-            // If we find a match, the user is re-importing a wallet that already exists in storage —
-            // IsOwnedByStore is still true because they proved ownership by presenting the nsec.
-            var candidateIds = new[] { WalletFactory.GetOutputDescriptorFromNsec(wallet) }
-                .Concat(WalletFactory.GetAlternateWalletIdsFromNsec(wallet));
-            foreach (var candidateId in candidateIds)
-            {
-                var existing = await walletStorage.GetWalletById(candidateId, HttpContext.RequestAborted);
-                if (existing is not null)
-                    return new TemporaryWalletSettings(null, candidateId, true, false);
-            }
-            return new TemporaryWalletSettings(wallet, null, true, false);
-        }
-
         // Check if input is a BIP-39 mnemonic (12 or 24 words)
         var words = wallet.Trim().Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
         if (words.Length is 12 or 24)
@@ -3233,19 +3193,6 @@ public class ArkController(
         var balances = await GetArkBalances(walletId, cancellationToken);
         var signerAvailable = await walletProvider.GetAddressProviderAsync(walletId, cancellationToken) != null;
 
-        // Get the default/active contract address
-        string? defaultAddress = null;
-        var adminActiveContracts = await contractStorage.GetContracts(walletIds: [walletId], isActive: true, take: 1, cancellationToken: cancellationToken);
-        var adminActiveContract = adminActiveContracts.FirstOrDefault();
-        if (adminActiveContract != null)
-        {
-            var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-            var script = Script.FromHex(adminActiveContract.Script);
-            var serverKey = OutputDescriptorHelpers.Extract(terms.SignerKey).XOnlyPubKey;
-            var address = ArkAddress.FromScriptPubKey(script, serverKey);
-            defaultAddress = address.ToString(terms.Network.ChainName == ChainName.Mainnet);
-        }
-
         // Check Ark Operator connection using helper
         var (arkOperatorConnected, arkOperatorError) = await CheckServiceConnectionAsync(
             ct => clientTransport.GetServerInfoAsync(ct), cancellationToken);
@@ -3265,7 +3212,6 @@ public class ArkController(
             WalletId = walletId,
             SignerAvailable = signerAvailable,
             Wallet = adminWallet.Secret,
-            DefaultAddress = defaultAddress,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
             ArkOperatorConnected = arkOperatorConnected,
             ArkOperatorError = ArkOperatorAvailability.DescribeMessage(arkOperatorError),

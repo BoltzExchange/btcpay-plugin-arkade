@@ -33,10 +33,9 @@ public class SpendingTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
-        var recipientStoreId = await CreateStoreWithSingleKeyWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{recipientStoreId}/overview");
-        var recipientAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
+        var storeId = await CreateStoreWithArkWalletAsync();
+        var recipientStoreId = await CreateStoreWithArkWalletAsync();
+        var recipientAddr = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, recipientStoreId);
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
@@ -74,7 +73,7 @@ public class SpendingTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
 

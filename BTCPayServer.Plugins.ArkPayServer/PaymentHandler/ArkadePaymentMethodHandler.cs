@@ -61,9 +61,7 @@ public class ArkadePaymentMethodHandler(
         context.TrackedDestinations.Add(context.Prompt.Destination);
         context.TrackedDestinations.Add(address.ScriptPubKey.PaymentScript.ToHex());
 
-        // Derive boarding address when: boarding enabled, no onchain BTC configured, HD wallet, amount above threshold.
-        // SingleKey (nsec) wallets are excluded because they derive the same boarding address for every invoice,
-        // causing duplicate AddressInvoice conflicts.
+        // Derive boarding address when: boarding enabled, no onchain BTC configured, amount above threshold.
         // Reuse the same signing descriptor from the Ark payment contract to avoid consuming an extra HD index.
         var hasOnchain = context.InvoiceEntity.GetPaymentPrompt(PaymentTypes.CHAIN.GetPaymentMethodId("BTC")) is not null;
         var wallet = await walletStorage.GetWalletById(arkadePaymentMethodConfig.WalletId);

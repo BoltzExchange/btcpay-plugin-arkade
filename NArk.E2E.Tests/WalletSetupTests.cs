@@ -41,10 +41,10 @@ public class WalletSetupTests : PlaywrightBaseTest
             new PageWaitForURLOptions { Timeout = 30_000 });
 
         var hdOption = Page.Locator("[data-testid='hd-wallet-option']");
-        var legacyOption = Page.Locator("[data-testid='legacy-wallet-option']");
+        var importOption = Page.Locator("[data-testid='import-wallet-option']");
 
         Assert.Equal(1, await hdOption.CountAsync());
-        Assert.Equal(1, await legacyOption.CountAsync());
+        Assert.Equal(1, await importOption.CountAsync());
     }
 
     /// <summary>The new-wallet path creates a wallet and lands on overview.</summary>
@@ -96,21 +96,6 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.Contains("Recovery seed", settingsBody);
         Assert.Contains("Show seed", settingsBody);
         Assert.DoesNotContain("not backed up", settingsBody, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Importing an nsec creates a SingleKey wallet.</summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ImportNsec_StoresWallet()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var nsec = GenerateRandomNsec();
-        var storeId = await CreateStoreWithArkWalletAsync(nsec);
-
-        Assert.Contains($"/plugins/ark/stores/{storeId}", Page!.Url);
-        Assert.DoesNotContain("/initial-setup", Page.Url);
     }
 
     /// <summary>Importing a BIP-39 seed phrase creates an HD wallet.</summary>
@@ -177,11 +162,8 @@ public class WalletSetupTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        // Use a SingleKey wallet so overview renders a stable address.
-        var donorStoreId = await CreateStoreWithSingleKeyWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{donorStoreId}/overview");
-        var donorAddress = await Page!.InputValueAsync("[data-testid='receive-address']");
-        Assert.False(string.IsNullOrWhiteSpace(donorAddress), "donor store has no receive address");
+        var donorStoreId = await CreateStoreWithArkWalletAsync();
+        var donorAddress = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, donorStoreId);
 
         var storeId = await CreateStore();
         await GoToUrl($"/plugins/ark/stores/{storeId}/getting-started");

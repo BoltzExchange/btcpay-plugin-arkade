@@ -114,7 +114,4 @@ public class SettlementTriggerTests : PlaywrightBaseTest
                throw new InvalidOperationException("Stored Arkade config did not contain walletId.");
     }
 
-    private static string? ReadString(Newtonsoft.Json.Linq.JToken token, string camelCaseName) =>
-        token.Value<string>(camelCaseName) ??
-        token.Value<string>(char.ToUpperInvariant(camelCaseName[0]) + camelCaseName[1..]);
 }
