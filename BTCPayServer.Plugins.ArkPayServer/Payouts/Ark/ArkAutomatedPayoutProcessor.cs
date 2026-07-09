@@ -53,7 +53,7 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
 
         var storeData = await _storeRepository.FindStore(PayoutProcessorSettings.StoreId) ??
             throw new InvalidOperationException("Could not find store by StoreId");
-        
+
         foreach (var payout in payouts)
         {
             if (payoutHandler.PayoutLocker.LockOrNullAsync(payout.Id, 0) is { } locker && await locker is {} disposable)
@@ -93,8 +93,11 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
                         }
                         catch (Exception e)
                         {
+                            Logs.PayServer.LogError(e,
+                                "Automated Arkade payout {PayoutId} to {Destination} failed to settle",
+                                payout.Id, destinationBip21);
                         }
-                
+
                     }
                     else
                         payout.State = PayoutState.Cancelled;

@@ -121,12 +121,17 @@ public class FeeEstimateResponse
     public bool IsLightning { get; set; }
 
     /// <summary>
-    /// Fee percentage for Lightning swaps.
+    /// Whether this is an Arkade→BTC chain swap (Arkade-mode Bitcoin destination).
+    /// </summary>
+    public bool IsChainSwap { get; set; }
+
+    /// <summary>
+    /// Fee percentage for Lightning/chain swaps.
     /// </summary>
     public decimal FeePercentage { get; set; }
 
     /// <summary>
-    /// Miner fee for Lightning swaps.
+    /// Miner fee for Lightning/chain swaps.
     /// </summary>
     public long MinerFeeSats { get; set; }
 

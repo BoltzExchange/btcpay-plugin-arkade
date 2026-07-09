@@ -771,6 +771,37 @@ public class ArkController(
 
                     return Json(response);
                 }
+
+                // Arkade-mode Bitcoin destination: within the chain-swap limits it settles via an
+                // Arkade→BTC chain swap (same mechanism as automatic mainchain settlement). When the
+                // amount is outside those limits (or chain swaps are unavailable) the /send endpoint
+                // silently falls back to a Batch settlement, so mirror that here by falling through
+                // to the Batch fee estimate below instead of erroring — keeping the wizard usable.
+                if (string.Equals(request.SpendType, "Arkade", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parseResult = ParseOutputDestination(new SpendOutputViewModel { Destination = dest }, serverInfo.Network);
+                    if (parseResult.Destination != null && parseResult.OutputType == ArkTxOutType.Onchain)
+                    {
+                        // Same source as MainchainSettlementService.GetMainchainSettlementLimits
+                        var chainLimits = boltzLimitsValidator != null
+                            ? await boltzLimitsValidator.GetChainLimitsAsync(isBtcToArk: false, token)
+                            : null;
+                        if (chainLimits != null)
+                        {
+                            var amount = request.Outputs[0].AmountSats ?? request.TotalInputSats;
+                            if (amount > 0 && amount >= chainLimits.MinAmount && amount <= chainLimits.MaxAmount)
+                            {
+                                response.IsChainSwap = true;
+                                response.FeePercentage = chainLimits.FeePercentage * 100; // Convert to percentage for display
+                                response.MinerFeeSats = chainLimits.MinerFee;
+                                response.EstimatedFeeSats = (long)Math.Ceiling(amount * chainLimits.FeePercentage) + chainLimits.MinerFee;
+                                response.FeeDescription = $"{chainLimits.FeePercentage * 100:F2}% + {chainLimits.MinerFee} sats miner fee";
+                                return Json(response);
+                            }
+                        }
+                        // Outside chain-swap limits (or unavailable): fall through to the Batch fee estimate.
+                    }
+                }
             }
 
             // Ark intent/transaction fees - need to get coins and build outputs
@@ -1552,9 +1583,11 @@ public class ArkController(
 
                 await arkadeSpendingService.Spend(store!, lnDestination, token);
 
-                // Mark payout as paid if this fulfills a payout
+                // Mark payout as paid if this fulfills a payout. A Lightning send returns no
+                // spend id, so this completes the payout (submarine-swap tracking would require
+                // ArkadeSpendingService.Spend to surface the swap id — see MarkPayoutFromSpendResult).
                 if (!string.IsNullOrEmpty(lnOutput.PayoutId))
-                    await MarkPayoutPaid(lnOutput.PayoutId, null, token);
+                    await MarkPayoutFromSpendResult(lnOutput.PayoutId, null, token);
 
                 return RedirectWithSuccess(nameof(StoreOverview), "Lightning payment sent!", new { storeId });
             }
@@ -1610,8 +1643,50 @@ public class ArkController(
             return View("Send", model);
         }
 
-        // Determine if batch is required (on-chain outputs or user preference)
+        // On-chain (bitcoin) destination handling:
+        //  - Arkade mode, a single output, and an amount within the chain-swap limits → settle via
+        //    an ARK→BTC chain swap (same mechanism as a Lightning send), initiated instantly.
+        //  - Anything the swap can't take (Batch chosen, multiple outputs, Boltz unavailable, or an
+        //    amount outside the swap limits) falls through to the batch path below.
         var hasOnchainOutput = arkOutputs.Any(o => o.Type == ArkTxOutType.Onchain);
+
+        if (hasOnchainOutput && !preferBatch && arkOutputs.Count == 1)
+        {
+            var settlementSats = arkOutputs[0].Value.Satoshi;
+            var chainLimits = boltzLimitsValidator is null
+                ? null
+                : await boltzLimitsValidator.GetChainLimitsAsync(isBtcToArk: false, token);
+            var withinChainSwapLimits = chainLimits is not null
+                && settlementSats >= chainLimits.MinAmount
+                && settlementSats <= chainLimits.MaxAmount;
+
+            if (withinChainSwapLimits)
+            {
+                try
+                {
+                    var btcOutput = validOutputs[0];
+                    // Chain swaps run their own coin selection, so the selected VTXOs are not passed as explicit inputs here.
+                    var swapId = await arkadeSpendingService.Spend(store!, btcOutput.Destination, settlementSats, null, token);
+
+                    // A chain swap only *initiates* the transfer, so the payout stays InProgress
+                    // (carrying the swap id) until it settles; it must not be marked delivered yet.
+                    if (!string.IsNullOrEmpty(btcOutput.PayoutId))
+                        await MarkPayoutFromSpendResult(btcOutput.PayoutId, swapId, token);
+
+                    return RedirectWithSuccess(nameof(StoreOverview),
+                        "Bitcoin settlement initiated via chain swap. Funds arrive once the swap settles.",
+                        new { storeId });
+                }
+                catch (Exception ex)
+                {
+                    model.Errors.Add($"Bitcoin settlement failed: {ex.Message}");
+                    return View("Send", model);
+                }
+            }
+            // Outside the chain-swap limits (or Boltz unavailable) → fall through to batch.
+        }
+
+        // Batch settles on-chain outputs the chain swap didn't take, plus any explicit Batch send.
         var useBatch = preferBatch || hasOnchainOutput;
 
         // Execute the spend
@@ -1667,7 +1742,7 @@ public class ArkController(
                 // Mark payouts as paid if any outputs fulfill payouts (no txId yet — assigned at batch time)
                 foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
                 {
-                    await MarkPayoutPaid(output.PayoutId!, null, token);
+                    await MarkPayoutFromSpendResult(output.PayoutId!, null, token);
                 }
 
                 return RedirectWithSuccess(nameof(Intents),
@@ -1690,7 +1765,7 @@ public class ArkController(
                 // Mark payouts as paid if any outputs fulfill payouts
                 foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
                 {
-                    await MarkPayoutPaid(output.PayoutId!, txId, token);
+                    await MarkPayoutFromSpendResult(output.PayoutId!, txId.ToString(), token);
                 }
 
                 return RedirectWithSuccess(nameof(StoreOverview), $"Transaction sent successfully! TxId: {txId}", new { storeId });
@@ -3359,27 +3434,29 @@ public class ArkController(
 
     #region Send helpers - destination parsing, LNURL resolution, payouts
 
-    private async Task MarkPayoutPaid(string payoutId, uint256? txId, CancellationToken token)
+    /// <summary>
+    /// Marks a payout from the result of a spend. A real on-ledger txid completes the payout;
+    /// a chain-swap transfer id leaves it InProgress until the swap settles, so undelivered funds
+    /// are never reported as paid. Mirrors <see cref="ArkAutomatedPayoutProcessor"/>'s proof handling.
+    /// </summary>
+    private async Task MarkPayoutFromSpendResult(string payoutId, string? spendResult, CancellationToken token)
     {
         try
         {
             using var disposable = await arkPayoutHandler.PayoutLocker.LockOrNullAsync(payoutId, 0, token);
             if (disposable is null) return;
 
-            var proof = new ArkPayoutProof
-            {
-                TransactionId = txId ?? uint256.Zero,
-                DetectedInBackground = false
-            };
+            var proof = ArkPayoutProof.FromSpendResult(spendResult);
             await pullPaymentHostedService.MarkPaid(new MarkPayoutRequest
             {
                 PayoutId = payoutId,
-                Proof = arkPayoutHandler.SerializeProof(proof)
+                Proof = arkPayoutHandler.SerializeProof(proof),
+                State = proof.ResolvedPayoutState ?? BTCPayServer.Client.Models.PayoutState.Completed
             });
         }
         catch
         {
-            // Best-effort: if marking fails, background detection will catch it
+            // Best-effort: background detection will reconcile if marking fails.
         }
     }
 

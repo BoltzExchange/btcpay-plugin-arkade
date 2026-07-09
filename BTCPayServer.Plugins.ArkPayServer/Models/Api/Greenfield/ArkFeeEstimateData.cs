@@ -24,13 +24,19 @@ public class ArkFeeEstimateData
     public bool IsLightning { get; set; }
 
     /// <summary>
+    /// True when the destination is a Bitcoin on-chain address settled via an Arkade→BTC chain swap
+    /// (Arkade spend type), in which case the fee breakdown reflects Boltz chain-swap fees.
+    /// </summary>
+    public bool IsChainSwap { get; set; }
+
+    /// <summary>
     /// Boltz fee percentage applied to the amount, expressed as a percentage (e.g. 0.5 for 0.5%).
-    /// Only meaningful when <see cref="IsLightning"/> is true.
+    /// Only meaningful when <see cref="IsLightning"/> or <see cref="IsChainSwap"/> is true.
     /// </summary>
     public decimal FeePercentage { get; set; }
 
     /// <summary>
-    /// Boltz miner fee in satoshis. Only meaningful when <see cref="IsLightning"/> is true.
+    /// Boltz miner fee in satoshis. Only meaningful when <see cref="IsLightning"/> or <see cref="IsChainSwap"/> is true.
     /// </summary>
     public long MinerFeeSats { get; set; }
 
