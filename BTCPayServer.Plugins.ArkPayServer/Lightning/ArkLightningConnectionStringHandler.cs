@@ -1,4 +1,5 @@
 using BTCPayServer.Lightning;
+using BTCPayServer.Plugins.ArkPayServer.Services;
 using Microsoft.Extensions.DependencyInjection;
 using NBitcoin;
 
@@ -18,6 +19,17 @@ public class ArkLightningConnectionStringHandler(IServiceProvider serviceProvide
         if (!kv.TryGetValue("wallet-id", out var walletId))
         {
             error = "The key 'wallet-id' is mandatory for ArkLightning connection strings";
+            return null;
+        }
+
+        // The token proves the connection string was issued by this plugin for a store that
+        // owns the wallet — a wallet id alone is derivable from public data and must not
+        // authorize spends.
+        kv.TryGetValue("token", out var token);
+        var ownershipService = serviceProvider.GetRequiredService<ArkWalletOwnershipService>();
+        if (!ownershipService.ValidateLightningToken(walletId, token).GetAwaiter().GetResult())
+        {
+            error = "The key 'token' is missing or invalid for ArkLightning connection strings";
             return null;
         }
 

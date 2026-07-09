@@ -181,10 +181,10 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.Contains("Unsupported", bodyText, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Importing an existing wallet id reuses that wallet.</summary>
+    /// <summary>Attaching another store's wallet by id is rejected.</summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task ImportWalletId_ReusesExistingWallet()
+    public async Task ImportWalletId_IsRejected()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -194,14 +194,40 @@ public class WalletSetupTests : PlaywrightBaseTest
         var walletId = await Page!.GetAttributeAsync(".truncate-center-id", "data-text");
         Assert.False(string.IsNullOrWhiteSpace(walletId), "store A has no wallet id");
 
-        var storeBId = await CreateStoreWithArkWalletAsync(walletId);
-        Assert.NotEqual(storeAId, storeBId);
-        Assert.DoesNotContain("/initial-setup", Page.Url);
+        var storeBId = await CreateStore();
+        await GoToUrl($"/plugins/ark/stores/{storeBId}/initial-setup");
 
-        // Verify store B's overview shows the same wallet id.
-        await GoToUrl($"/plugins/ark/stores/{storeBId}/overview");
-        var storeBWalletId = await Page.GetAttributeAsync(".truncate-center-id", "data-text");
-        Assert.Equal(walletId, storeBWalletId);
+        await OpenImportWalletSettlementStepAsync(walletId!);
+        await Page.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        Assert.Contains("/initial-setup", Page.Url);
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.Contains("Unsupported", bodyText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Restoring another store's seed phrase is rejected.</summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ImportMnemonicUsedByAnotherStore_IsRejected()
+    {
+        _fixture.Initialize(this);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
+
+        var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
+        var storeAId = await CreateStoreWithArkWalletAsync(mnemonic);
+
+        var storeBId = await CreateStore();
+        Assert.NotEqual(storeAId, storeBId);
+        await GoToUrl($"/plugins/ark/stores/{storeBId}/initial-setup");
+
+        await OpenImportWalletSettlementStepAsync(mnemonic);
+        await Page!.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        Assert.Contains("/initial-setup", Page.Url);
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.Contains("already in use by another store", bodyText, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

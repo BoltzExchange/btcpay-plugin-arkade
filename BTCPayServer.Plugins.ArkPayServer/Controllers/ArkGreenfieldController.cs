@@ -53,6 +53,7 @@ public class ArkGreenfieldController(
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
     IClientTransport clientTransport,
     ArkadeSpendingService arkadeSpendingService,
+    ArkWalletOwnershipService walletOwnership,
     ISpendingService arkadeSpender,
     IFeeEstimator feeEstimator,
     IContractService contractService,
@@ -90,7 +91,6 @@ public class ArkGreenfieldController(
             WalletId = config.WalletId!,
             WalletType = (wallet?.WalletType ?? WalletType.HD).ToString(),
             SignerAvailable = signerAvailable,
-            IsOwnedByStore = config.GeneratedByStore,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             LightningEnabled = IsArkadeLightningEnabled()
         });
@@ -114,29 +114,28 @@ public class ArkGreenfieldController(
 
         try
         {
-            var (walletInfo, walletId, isNew, mnemonic) = await ResolveWalletInput(
-                request.Wallet, cancellationToken);
+            var (walletInfo, mnemonic) = await ResolveWalletInput(request.Wallet, cancellationToken);
 
-            if (walletInfo != null)
-            {
-                await walletStorage.UpsertWallet(walletInfo, updateIfExists: true, cancellationToken);
+            if (await walletOwnership.IsWalletUsedByAnyStore(walletInfo.Id, excludeStoreId: store.Id))
+                return this.CreateAPIError(409, "wallet-already-used",
+                    "This wallet is already in use by another store.");
 
-                walletId = walletInfo.Id;
-            }
+            await walletStorage.UpsertWallet(walletInfo, updateIfExists: true, cancellationToken);
+            var walletId = walletInfo.Id;
 
-            // Sync existing contracts if linking an existing wallet: boarding (on-chain) drives the
-            // UTXO sync, off-chain (VTXO) scripts drive the indexer poll.
+            // Sync existing contracts if restoring a previously known wallet: boarding (on-chain)
+            // drives the UTXO sync, off-chain (VTXO) scripts drive the indexer poll.
             var boardingContracts = await contractStorage.GetContracts(
-                walletIds: [walletId!], scope: ContractScope.Onchain, cancellationToken: cancellationToken);
+                walletIds: [walletId], scope: ContractScope.Onchain, cancellationToken: cancellationToken);
             var offchainScripts = (await contractStorage.GetContracts(
-                    walletIds: [walletId!], scope: ContractScope.Offchain, cancellationToken: cancellationToken))
+                    walletIds: [walletId], scope: ContractScope.Offchain, cancellationToken: cancellationToken))
                 .Select(c => c.Script).ToHashSet();
             if (offchainScripts.Count > 0)
                 await vtxoSyncService.PollScriptsForVtxos(offchainScripts, cancellationToken);
             if (boardingContracts.Count > 0)
                 await boardingUtxoSyncService.SyncAsync(boardingContracts, cancellationToken);
 
-            var config = new ArkadePaymentMethodConfig(walletId!, isNew);
+            var config = new ArkadePaymentMethodConfig(walletId);
             store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], config);
             store.SetDefaultPaymentId(ArkadePlugin.ArkadePaymentMethodId);
 
@@ -144,16 +143,16 @@ public class ArkGreenfieldController(
             var lightningEnabled = false;
             if (request.EnableLightning)
             {
-                lightningEnabled = ConfigureLightning(store, walletId!);
+                lightningEnabled = await ConfigureLightning(store, walletId, cancellationToken);
             }
 
             await storeRepository.UpdateStore(store);
 
             return Ok(new ArkWalletSetupResponse
             {
-                WalletId = walletId!,
-                WalletType = (walletInfo?.WalletType ?? WalletType.HD).ToString(),
-                IsNewWallet = isNew,
+                WalletId = walletId,
+                WalletType = walletInfo.WalletType.ToString(),
+                IsNewWallet = mnemonic != null,
                 LightningEnabled = lightningEnabled,
                 Mnemonic = mnemonic
             });
@@ -338,14 +337,11 @@ public class ArkGreenfieldController(
     public async Task<IActionResult> Send(string storeId, [FromBody] ArkSendRequest request,
         CancellationToken cancellationToken)
     {
-        var (config, error) = GetStoreConfig();
+        var (_, error) = GetStoreConfig();
         if (error != null) return error;
 
         if (string.IsNullOrWhiteSpace(request.Destination))
             return this.CreateAPIError("missing-destination", "Destination is required.");
-
-        if (!config!.GeneratedByStore)
-            return this.CreateAPIError(403, "not-owned", "Wallet is not owned by this store.");
 
         try
         {
@@ -1292,9 +1288,9 @@ public class ArkGreenfieldController(
 
     /// <summary>
     /// Resolves wallet input into wallet info, following the same logic as ArkController.GetFromInputWallet.
-    /// Returns: (walletInfo if new wallet needs creating, walletId, isNewlyGenerated, mnemonic if generated).
+    /// Returns: (walletInfo, mnemonic if newly generated).
     /// </summary>
-    private async Task<(ArkWalletInfo? WalletInfo, string? WalletId, bool IsNew, string? Mnemonic)> ResolveWalletInput(
+    private async Task<(ArkWalletInfo WalletInfo, string? Mnemonic)> ResolveWalletInput(
         string? wallet, CancellationToken cancellationToken)
     {
         var serverInfo = await clientTransport.GetServerInfoAsync(cancellationToken);
@@ -1305,7 +1301,7 @@ public class ArkGreenfieldController(
             var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve);
             var mnemonicStr = mnemonic.ToString();
             var walletInfo = await WalletFactory.CreateWallet(mnemonicStr, destination: null, serverInfo, cancellationToken);
-            return (walletInfo, walletInfo.Id, true, mnemonicStr);
+            return (walletInfo, mnemonicStr);
         }
 
         // BIP-39 mnemonic (12 or 24 words)
@@ -1317,24 +1313,19 @@ public class ArkGreenfieldController(
                 var mnemonic = new Mnemonic(wallet.Trim(), Wordlist.English);
                 var walletInfo = await WalletFactory.CreateWallet(
                     mnemonic.ToString(), destination: null, serverInfo, cancellationToken);
-                return (walletInfo, walletInfo.Id, true, null);
+                return (walletInfo, null);
             }
             catch
             {
-                // Not a valid mnemonic, fall through
+                // Not a valid mnemonic, fall through to the error below
             }
         }
 
-        // Existing wallet ID
-        var existingWallet = await walletStorage.GetWalletById(wallet, cancellationToken);
-        if (existingWallet != null)
-            return (null, wallet, false, null);
-
         throw new InvalidOperationException(
-            "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words) or existing wallet ID.");
+            "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words).");
     }
 
-    private bool ConfigureLightning(StoreData store, string walletId)
+    private async Task<bool> ConfigureLightning(StoreData store, string walletId, CancellationToken cancellationToken)
     {
         var lightningPaymentMethodId = PaymentTypes.LN.GetPaymentMethodId("BTC");
         var existingLnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
@@ -1345,7 +1336,7 @@ public class ArkGreenfieldController(
 
         var lnConfig = new LightningPaymentMethodConfig
         {
-            ConnectionString = $"type=arkade;wallet-id={walletId}",
+            ConnectionString = await walletOwnership.CreateLightningConnectionString(walletId, cancellationToken),
         };
 
         store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], lnConfig);

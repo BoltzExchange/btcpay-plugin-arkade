@@ -78,9 +78,6 @@ public class ArkadeSpendingService(
         if (config?.WalletId is null)
             throw new IncompleteArkadeSetupException("arkade wallet setup was not done!");
 
-        if (!config.GeneratedByStore)
-            throw new IncompleteArkadeSetupException("Wallet does not belong to the current store.");
-
         if (amountSats is < 0)
             throw new MalformedPaymentDestination("Amount must be non-negative.");
 

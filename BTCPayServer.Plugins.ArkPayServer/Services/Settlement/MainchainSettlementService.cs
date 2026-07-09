@@ -58,7 +58,7 @@ public class MainchainSettlementService(
         SettlementInput? input,
         CancellationToken cancellationToken)
     {
-        var available = IsAvailable(store, config, out var unavailableReason);
+        var available = IsAvailable(store, out var unavailableReason);
         var configuredThreshold = GetConfiguredThreshold(config);
         var thresholdValue = input?.Get(MainchainSettlementData.ThresholdKey) ??
             configuredThreshold?.ToString(CultureInfo.InvariantCulture);
@@ -108,7 +108,7 @@ public class MainchainSettlementService(
         ArkadePaymentMethodConfig config,
         SettlementInput? input)
     {
-        if (!IsWalletOwnedByStore(config) || !IsAvailable(store, out _))
+        if (!IsAvailable(store, out _))
             return config;
 
         var (threshold, _) = ReadThreshold(input);
@@ -134,10 +134,6 @@ public class MainchainSettlementService(
 
         if (command != SaveCommand)
             return SettlementOptionUpdateResult.Error("Unsupported settlement option command.");
-
-        if (!IsWalletOwnedByStore(config))
-            return SettlementOptionUpdateResult.Error(
-                "Mainchain settlement requires a wallet owned by this store.");
 
         var validationResult = await ValidateInput(store, input, cancellationToken);
         if (validationResult is not null)
@@ -374,7 +370,6 @@ public class MainchainSettlementService(
 
             var thresholdSats = config is null ? null : GetConfiguredThreshold(config);
             if (string.IsNullOrWhiteSpace(config?.WalletId) ||
-                !config.GeneratedByStore ||
                 thresholdSats is not > 0)
                 continue;
 
@@ -446,23 +441,6 @@ public class MainchainSettlementService(
         unavailableReason = null;
         return true;
     }
-
-    private bool IsAvailable(
-        StoreData store,
-        ArkadePaymentMethodConfig config,
-        out string? unavailableReason)
-    {
-        if (!IsWalletOwnedByStore(config))
-        {
-            unavailableReason = "Mainchain settlement requires a wallet owned by this store.";
-            return false;
-        }
-
-        return IsAvailable(store, out unavailableReason);
-    }
-
-    private static bool IsWalletOwnedByStore(ArkadePaymentMethodConfig config) =>
-        config.GeneratedByStore || string.IsNullOrWhiteSpace(config.WalletId);
 
     private static long? NormalizeThreshold(long? thresholdSats) =>
         thresholdSats is > 0 ? thresholdSats : null;

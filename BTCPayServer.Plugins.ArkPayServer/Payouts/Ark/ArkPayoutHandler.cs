@@ -85,7 +85,7 @@ public class ArkPayoutHandler : IPayoutHandler, IHasNetwork, IActiveScriptsProvi
                     true
                 );
 
-        return !string.IsNullOrWhiteSpace(config?.WalletId) && config.GeneratedByStore;
+        return !string.IsNullOrWhiteSpace(config?.WalletId);
     }
 
     public Task TrackClaim(ClaimRequest claimRequest, PayoutData payoutData)

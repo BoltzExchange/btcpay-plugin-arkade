@@ -5,7 +5,6 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models;
 public class StoreSettingsViewModel
 {
     public WalletType WalletType { get; set; }
-    public bool CanManagePrivateKeys { get; set; }
 
     public bool IsLightningEnabled { get; set; }
     public StoreSettingsFormModel Form { get; set; } = new();

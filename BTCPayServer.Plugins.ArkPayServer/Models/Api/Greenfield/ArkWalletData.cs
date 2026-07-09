@@ -8,7 +8,6 @@ public class ArkWalletData
     public string WalletId { get; set; } = "";
     public string WalletType { get; set; } = "";
     public bool SignerAvailable { get; set; }
-    public bool IsOwnedByStore { get; set; }
     public bool AllowSubDustAmounts { get; set; }
     public bool LightningEnabled { get; set; }
 }

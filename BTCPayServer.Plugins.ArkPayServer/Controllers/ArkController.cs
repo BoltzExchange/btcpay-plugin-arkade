@@ -19,7 +19,6 @@ using BTCPayServer.Plugins.ArkPayServer.Payouts.Ark;
 using BTCPayServer.Plugins.ArkPayServer.Services;
 using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
 using BTCPayServer.Plugins.ArkPayServer.Services.WalletLogger;
-using BTCPayServer.Security;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using System.Text.Json;
@@ -61,7 +60,6 @@ public class ArkController(
     BoltzLimitsValidator? boltzLimitsValidator,
     BoltzClient? boltzClient,
     ArkNetworkConfig arkNetworkConfig,
-    IAuthorizationService authorizationService,
     ArkPayoutHandler arkPayoutHandler,
     StoreRepository storeRepository,
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
@@ -69,6 +67,7 @@ public class ArkController(
     ArkOperatorHealthService arkOperatorHealth,
     BoltzHealthService boltzHealth,
     ArkadeSpendingService arkadeSpendingService,
+    ArkWalletOwnershipService walletOwnership,
     ArkAutomatedPayoutSenderFactory payoutSenderFactory,
     PayoutProcessorService payoutProcessorService,
     IEnumerable<ISettlementOption> settlementOptions,
@@ -159,37 +158,40 @@ public class ArkController(
 
         try
         {
-            var walletSettings = await GetFromInputWallet(model.Wallet, model.Mode);
+            var walletSettings = GetFromInputWallet(model.Wallet, model.Mode);
 
-            if (walletSettings.Wallet is not null)
+            string walletId;
+            try
             {
-                try
-                {
-                    var serverInfo = await clientTransport.GetServerInfoAsync(HttpContext.RequestAborted);
-                    var wallet = await WalletFactory.CreateWallet(
-                        walletSettings.Wallet,
-                        destination: null,
-                        serverInfo,
-                        HttpContext.RequestAborted);
+                var serverInfo = await clientTransport.GetServerInfoAsync(HttpContext.RequestAborted);
+                var wallet = await WalletFactory.CreateWallet(
+                    walletSettings.Wallet,
+                    destination: null,
+                    serverInfo,
+                    HttpContext.RequestAborted);
 
-                    await walletStorage.UpsertWallet(wallet, updateIfExists: true, HttpContext.RequestAborted);
-
-                    walletSettings = walletSettings with { WalletId = wallet.Id };
-                }
-                catch (Exception ex)
+                if (await walletOwnership.IsWalletUsedByAnyStore(wallet.Id, excludeStoreId: store.Id))
                 {
-                    TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(ex, "Could not update wallet");
+                    ModelState.AddModelError(nameof(model.Wallet), "This wallet is already in use by another store.");
                     return View(model);
                 }
+
+                await walletStorage.UpsertWallet(wallet, updateIfExists: true, HttpContext.RequestAborted);
+
+                walletId = wallet.Id;
+            }
+            catch (Exception ex)
+            {
+                TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(ex, "Could not update wallet");
+                return View(model);
             }
 
             // Background recovery scans derivation paths, restores swaps,
             // finalizes pending txs, and syncs boarding UTXOs.
-            StartBackgroundRecovery(walletSettings.WalletId!);
+            StartBackgroundRecovery(walletId);
 
             var config = new ArkadePaymentMethodConfig(
-                walletSettings.WalletId!,
-                walletSettings.IsOwnedByStore,
+                walletId,
                 WalletBackedUp: !walletSettings.IsNewlyGeneratedWallet);
             foreach (var option in settlementOptions)
                 config = option.ApplyInitialSetupDefault(
@@ -210,7 +212,7 @@ public class ArkController(
 
                 var lnConfig = new LightningPaymentMethodConfig()
                 {
-                    ConnectionString = $"type=arkade;wallet-id={config.WalletId}",
+                    ConnectionString = await walletOwnership.CreateLightningConnectionString(config.WalletId, HttpContext.RequestAborted),
                 };
 
                 store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], lnConfig);
@@ -288,15 +290,12 @@ public class ArkController(
 
     [HttpPost("stores/{storeId}/rescan")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Rescan(string storeId)
+    public IActionResult Rescan(string storeId)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-        if (!config!.GeneratedByStore || string.IsNullOrEmpty(config.WalletId))
-            return RedirectWithError(nameof(StoreOverview),
-                "Rescan requires a store-managed wallet.", new { storeId });
 
-        StartBackgroundRecovery(config.WalletId);
+        StartBackgroundRecovery(config!.WalletId!);
         return RedirectWithSuccess(nameof(StoreOverview),
             "Wallet rescan started — contracts, funds and swaps will refresh shortly.", new { storeId });
     }
@@ -305,7 +304,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> StoreOverview(CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
@@ -327,11 +326,6 @@ public class ArkController(
 
         // Check Boltz connection and get cached limits
         var (boltzConnected, boltzError, boltzLimits) = await GetBoltzConnectionStatusAsync(cancellationToken);
-
-        // Determine if user can manage private keys (spend/view keys)
-        // Allowed if: wallet was generated by this store OR user is server admin
-        var canManagePrivateKeys = config!.GeneratedByStore ||
-            (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
 
         var recentPayments = new List<RecentPaymentViewModel>();
         var receivedVolumeSats = 0L;
@@ -496,7 +490,6 @@ public class ArkController(
             HasCurrentWalletFunds = totalVtxoCount > 0,
             Wallet = wallet?.Secret,
             WalletType = wallet?.WalletType ?? WalletType.HD,
-            CanManagePrivateKeys = canManagePrivateKeys,
             RecoveryStatus = config.WalletId is { } recoveryWalletId ? recoveryStatusTracker.Get(recoveryWalletId) : null,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
             ArkOperatorConnected = arkOperatorStatus.Available,
@@ -522,9 +515,9 @@ public class ArkController(
 
     [HttpGet("stores/{storeId}/wallet-log")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> DownloadWalletLog(string storeId)
+    public IActionResult DownloadWalletLog(string storeId)
     {
-        var (_, config, errorResult) = await ValidateStoreAndConfig();
+        var (_, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var walletId = config!.WalletId!;
@@ -552,18 +545,15 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Settings(string storeId, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
         var (boltzConnected, boltzError, _) = await GetBoltzConnectionStatusAsync(cancellationToken);
-        var canManagePrivateKeys = config.GeneratedByStore ||
-            (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
 
         return View("Settings", new StoreSettingsViewModel
         {
             WalletType = wallet?.WalletType ?? WalletType.HD,
-            CanManagePrivateKeys = canManagePrivateKeys,
             IsLightningEnabled = IsArkadeLightningEnabled(),
             Form = new StoreSettingsFormModel(),
             AllowSubDustAmounts = config.AllowSubDustAmounts,
@@ -578,17 +568,12 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> ShowPrivateKey(string storeId, string? returnTo = null)
     {
-        var (_, config, errorResult) = await ValidateStoreAndConfig();
+        var (_, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var wallet = await walletStorage.GetWalletById(config!.WalletId);
         if (wallet?.Secret == null)
             return NotFound();
-
-        var canManagePrivateKeys = config.GeneratedByStore ||
-            (await authorizationService.AuthorizeAsync(User, null, new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
-        if (!canManagePrivateKeys)
-            return Forbid();
 
         var returnAction = returnTo == "settings" ? nameof(Settings) : nameof(StoreOverview);
         return this.RedirectToRecoverySeedBackup(new RecoverySeedBackupViewModel
@@ -608,7 +593,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Receive(string storeId, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var model = new ArkReceiveViewModel();
@@ -635,7 +620,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Receive(string storeId, string command, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         try
@@ -731,7 +716,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> EstimateFees(string storeId, [FromBody] FeeEstimateRequest request, CancellationToken token)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return BadRequest("Invalid store settings");
 
         try
@@ -967,7 +952,7 @@ public class ArkController(
         [FromBody] ParseDestinationRequest request,
         CancellationToken token)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return BadRequest("Invalid store settings");
 
         try
@@ -1012,7 +997,7 @@ public class ArkController(
         [FromBody] SuggestCoinsRequest request,
         CancellationToken token)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null)
             return Json(new SuggestCoinsResponse { Error = "Store not configured" });
 
@@ -1114,7 +1099,7 @@ public class ArkController(
         [FromBody] ValidateSpendRequest request,
         CancellationToken token)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null)
             return Json(new ValidateSpendResponse { Errors = { "Store not configured" } });
 
@@ -1238,7 +1223,7 @@ public class ArkController(
         string? destination,
         CancellationToken token)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null)
             return errorResult;
 
@@ -1380,7 +1365,7 @@ public class ArkController(
         [FromForm] string? CoinSelectionMode,
         CancellationToken token)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null)
             return errorResult;
 
@@ -1886,7 +1871,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> UpdateWalletConfig(string storeId, StoreSettingsFormModel model, string? command = null, string? returnTo = null, CancellationToken cancellationToken = default)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
         var storeData = store!;
         var arkConfig = config!;
@@ -1937,7 +1922,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> UpdateDestination(string storeId, string destination, CancellationToken ct)
     {
-        var (_, config, errorResult) = await ValidateStoreAndConfig();
+        var (_, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         destination = destination?.Trim() ?? string.Empty;
@@ -1977,18 +1962,15 @@ public class ArkController(
         int count = 50,
         bool debug = false)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-
-        if (!config!.GeneratedByStore)
-            return View(new StoreContractsViewModel { StoreId = storeId });
 
         // Get status filter using helper
         var activeFilter = ParseBooleanFilter(searchTerm, "status", "active");
 
         // Get contracts with pagination
         var contracts = await contractStorage.GetContracts(
-            walletIds: [config.WalletId],
+            walletIds: [config!.WalletId],
             isActive: activeFilter,
             searchText: searchText,
             skip: skip,
@@ -2035,7 +2017,6 @@ public class ArkController(
             Search = new SearchString(searchTerm),
             ContractVtxos = contractVtxos,
             ContractSwaps = contractSwaps,
-            CanManageContracts = config.GeneratedByStore,
             Debug = debug,
             CachedSwapScripts = [], // Active swap scripts tracked by SwapsManagementService internally
             CachedContractScripts = (await contractStorage.GetContracts(walletIds: [config.WalletId], isActive: true, cancellationToken: HttpContext.RequestAborted))
@@ -2056,11 +2037,8 @@ public class ArkController(
         int count = 50,
         bool debug = false)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-
-        if (!config!.GeneratedByStore)
-            return View(new StoreSwapsViewModel { StoreId = storeId });
 
         // Get status filter using helper
         var statusFilter = ParseEnumFilter<ArkSwapStatus>(searchTerm, "status", s => s switch
@@ -2084,7 +2062,7 @@ public class ArkController(
         });
 
         var swaps = await swapStorage.GetSwaps(
-            walletIds: [config.WalletId!],
+            walletIds: [config!.WalletId!],
             status: statusFilter != null ? [statusFilter.Value] : null,
             swapTypes: typeFilter != null ? [typeFilter.Value] : null,
             searchText: searchText,
@@ -2119,7 +2097,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> PollSwap(string storeId, string swapId)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         try
@@ -2255,11 +2233,8 @@ public class ArkController(
         int skip = 0,
         int count = 50)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-
-        if (!config!.GeneratedByStore)
-            return View(new StoreVtxosViewModel { StoreId = storeId });
 
         // Parse status filters - default to unspent and recoverable if no filter is set
         var search = new SearchString(searchTerm);
@@ -2312,7 +2287,7 @@ public class ArkController(
         }
 
         // Get contract scripts for the wallet and fetch VTXOs
-        var allContracts = await contractStorage.GetContracts(walletIds: [config.WalletId], cancellationToken: HttpContext.RequestAborted);
+        var allContracts = await contractStorage.GetContracts(walletIds: [config!.WalletId], cancellationToken: HttpContext.RequestAborted);
         var vtxoContractScripts = allContracts.Select(c => c.Script).ToList();
         var vtxos = await vtxoStorage.GetVtxos(
             scripts: vtxoContractScripts,
@@ -2385,11 +2360,8 @@ public class ArkController(
         int skip = 0,
         int count = 50)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-
-        if (!config!.GeneratedByStore)
-            return View(new StoreIntentsViewModel { StoreId = storeId });
 
         // Get state filter using helper
         var stateFilter = ParseEnumFilter<ArkIntentState>(searchTerm, "state", s => s switch
@@ -2403,7 +2375,7 @@ public class ArkController(
         });
 
         var intents = await intentStorage.GetIntents(
-            walletIds: [config.WalletId!],
+            walletIds: [config!.WalletId!],
             states: stateFilter != null ? [stateFilter.Value] : null,
             searchText: searchText,
             skip: skip,
@@ -2448,7 +2420,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> EnableLightning(string storeId)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var lightningPaymentMethodId = GetLightningPaymentMethod();
@@ -2456,7 +2428,7 @@ public class ArkController(
 
         store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], new LightningPaymentMethodConfig
         {
-            ConnectionString = $"type=arkade;wallet-id={config!.WalletId}",
+            ConnectionString = await walletOwnership.CreateLightningConnectionString(config!.WalletId!, HttpContext.RequestAborted),
         });
         store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lnurlPaymentMethodId], new LNURLPaymentMethodConfig
         {
@@ -2476,7 +2448,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> DisableLightning(string storeId)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         store!.SetPaymentMethodConfig(GetLightningPaymentMethod(), null);
@@ -2488,7 +2460,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> ClearWallet(string storeId)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         var walletId = config!.WalletId;
@@ -2504,7 +2476,7 @@ public class ArkController(
 
         // Delete wallet from DB if no other store references it
         // Exclude current store since we just cleared its config above (GetStores may return cached data)
-        if (!string.IsNullOrEmpty(walletId) && !await IsWalletUsedByAnyStore(walletId, excludeStoreId: storeId))
+        if (!string.IsNullOrEmpty(walletId) && !await walletOwnership.IsWalletUsedByAnyStore(walletId, excludeStoreId: storeId))
         {
             await walletStorage.DeleteWallet(walletId, HttpContext.RequestAborted);
         }
@@ -2516,7 +2488,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> ForceRefresh(string storeId, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         try
@@ -2570,7 +2542,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> CancelIntent(string storeId, string intentTxId, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         try
@@ -2624,7 +2596,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SyncWallet(string storeId, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         try
@@ -2643,7 +2615,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SyncContract(string storeId, string script, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         try
@@ -2665,16 +2637,12 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> DeleteContract(string storeId, string script, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-
-        // Only allow deletion if wallet is generated by store
-        if (!config!.GeneratedByStore)
-            return RedirectWithError(nameof(Contracts), "Cannot delete contract: Wallet is not managed by this store.", new { storeId });
 
         try
         {
-            var contracts = await contractStorage.GetContracts(walletIds: [config.WalletId], scripts: [script], cancellationToken: cancellationToken);
+            var contracts = await contractStorage.GetContracts(walletIds: [config!.WalletId], scripts: [script], cancellationToken: cancellationToken);
             if (!contracts.Any())
                 return RedirectWithError(nameof(Contracts), "Contract not found.", new { storeId });
 
@@ -2697,12 +2665,8 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> ImportContract(string storeId, string contractString, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
-
-        // Only allow import if wallet is generated by store
-        if (!config!.GeneratedByStore)
-            return RedirectWithError(nameof(Contracts), "Cannot import contract: Wallet is not managed by this store.", new { storeId });
 
         if (string.IsNullOrWhiteSpace(contractString))
             return RedirectWithError(nameof(Contracts), "Contract string is required.", new { storeId });
@@ -2720,7 +2684,7 @@ public class ArkController(
             var scriptHex = script.ToHex();
 
             // Check if contract already exists
-            var existingContracts = await contractStorage.GetContracts(walletIds: [config.WalletId], scripts: [scriptHex], cancellationToken: cancellationToken);
+            var existingContracts = await contractStorage.GetContracts(walletIds: [config!.WalletId], scripts: [scriptHex], cancellationToken: cancellationToken);
             if (existingContracts.Any())
                 return RedirectWithError(nameof(Contracts), "Contract already exists in this wallet.", new { storeId });
 
@@ -2750,13 +2714,13 @@ public class ArkController(
         return lnEnabled;
     }
 
-    private async Task<TemporaryWalletSettings> GetFromInputWallet(string? wallet, WalletSetupMode mode = WalletSetupMode.Auto)
+    private static TemporaryWalletSettings GetFromInputWallet(string? wallet, WalletSetupMode mode = WalletSetupMode.Auto)
     {
         if (mode != WalletSetupMode.Auto)
             throw new Exception("Unsupported wallet setup mode.");
 
         if (string.IsNullOrWhiteSpace(wallet))
-            return new TemporaryWalletSettings(GenerateWallet(), null, true, true);
+            return new TemporaryWalletSettings(GenerateWallet(), true);
 
         // Check if input is a BIP-39 mnemonic (12 or 24 words)
         var words = wallet.Trim().Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
@@ -2766,18 +2730,15 @@ public class ArkController(
             {
                 // Validate the mnemonic
                 var mnemonic = new Mnemonic(wallet.Trim(), Wordlist.English);
-                return new TemporaryWalletSettings(mnemonic.ToString(), null, true, false);
+                return new TemporaryWalletSettings(mnemonic.ToString(), false);
             }
             catch
             {
-                // Not a valid mnemonic, continue to other checks
+                // Not a valid mnemonic, fall through to the error below
             }
         }
 
-        var existingWallet = await walletStorage.GetWalletById(wallet, HttpContext.RequestAborted);
-        return existingWallet == null
-            ? throw new Exception("Unsupported value. Enter a BIP-39 seed phrase (12 or 24 words) or wallet ID.")
-            : new TemporaryWalletSettings(null, wallet, false, false);
+        throw new Exception("Unsupported value. Enter a BIP-39 seed phrase (12 or 24 words).");
     }
     private static string GenerateWallet()
     {
@@ -2793,7 +2754,7 @@ public class ArkController(
         return store.GetPaymentMethodConfig<T>(paymentMethodId, paymentMethodHandlerDictionary);
     }
 
-    private record TemporaryWalletSettings(string? Wallet, string? WalletId, bool IsOwnedByStore, bool IsNewlyGeneratedWallet);
+    private record TemporaryWalletSettings(string Wallet, bool IsNewlyGeneratedWallet);
 
     [HttpGet("~/stores/{storeId}/payout-processors/ark-automated")]
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
@@ -3022,37 +2983,10 @@ public class ArkController(
     #region Helper Methods
 
     /// <summary>
-    /// Checks whether the given wallet ID is referenced by any store's Ark or LN payment method config.
-    /// </summary>
-    private async Task<bool> IsWalletUsedByAnyStore(string walletId, string? excludeStoreId = null)
-    {
-        var allStores = await storeRepository.GetStores();
-        var lnPaymentMethod = GetLightningPaymentMethod();
-        var lnWalletRef = $"wallet-id={walletId}";
-        foreach (var s in allStores)
-        {
-            if (excludeStoreId != null && s.Id == excludeStoreId)
-                continue;
-
-            var arkConfig = s.GetPaymentMethodConfig<ArkadePaymentMethodConfig>(
-                ArkadePlugin.ArkadePaymentMethodId, paymentMethodHandlerDictionary);
-            if (arkConfig?.WalletId == walletId)
-                return true;
-
-            var lnConfig = s.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
-                lnPaymentMethod, paymentMethodHandlerDictionary);
-            if (lnConfig?.ConnectionString?.Contains(lnWalletRef, StringComparison.OrdinalIgnoreCase) is true)
-                return true;
-        }
-        return false;
-    }
-
-    /// <summary>
     /// Validates store data and Arkade configuration, returning an error result if validation fails.
-    /// Server admins bypass the <paramref name="requireOwnedByStore"/> check.
     /// </summary>
-    private async Task<(StoreData? store, ArkadePaymentMethodConfig? config, IActionResult? errorResult)>
-        ValidateStoreAndConfig(bool requireOwnedByStore = false)
+    private (StoreData? store, ArkadePaymentMethodConfig? config, IActionResult? errorResult)
+        ValidateStoreAndConfig()
     {
         var store = HttpContext.GetStoreData();
         if (store == null)
@@ -3061,14 +2995,6 @@ public class ArkController(
         var config = GetConfig<ArkadePaymentMethodConfig>(ArkadePlugin.ArkadePaymentMethodId, store);
         if (config?.WalletId is null)
             return (null, null, RedirectToAction(nameof(GettingStarted), new { storeId = store.Id }));
-
-        if (requireOwnedByStore && !config.GeneratedByStore)
-        {
-            var isServerAdmin = (await authorizationService.AuthorizeAsync(User, null,
-                new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded;
-            if (!isServerAdmin)
-                return (null, null, RedirectToAction(nameof(StoreOverview), new { storeId = store.Id }));
-        }
 
         return (store, config, null);
     }
@@ -3179,7 +3105,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> MassActionVtxos(string storeId, string command, string[] selectedItems, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         if (selectedItems.Length == 0)
@@ -3227,7 +3153,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> MassActionSwaps(string storeId, string command, string[] selectedItems, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         if (selectedItems.Length == 0)
@@ -3279,7 +3205,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> MassActionContracts(string storeId, string command, string[] selectedItems, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         if (selectedItems.Length == 0)
@@ -3335,9 +3261,9 @@ public class ArkController(
 
     [HttpPost("stores/{storeId}/contracts/vtxos-sublist/mass-action")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> MassActionVtxosSublist(string storeId, string contractScript, string command, string[] selectedItems, CancellationToken cancellationToken)
+    public IActionResult MassActionVtxosSublist(string storeId, string contractScript, string command, string[] selectedItems, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         if (selectedItems.Length == 0)
@@ -3365,7 +3291,7 @@ public class ArkController(
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> MassActionSwapsSublist(string storeId, string contractScript, string command, string[] selectedItems, CancellationToken cancellationToken)
     {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
+        var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
         if (selectedItems.Length == 0)

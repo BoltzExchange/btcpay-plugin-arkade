@@ -41,7 +41,7 @@
                 </div>
                 <div class="content">
                     <h4>Use an existing wallet</h4>
-                    <p class="mb-0 text-secondary">Import from seed phrase or existing wallet ID</p>
+                    <p class="mb-0 text-secondary">Restore from a BIP-39 seed phrase</p>
                 </div>
                 <vc:icon symbol="caret-right" />
             </a>
@@ -55,15 +55,11 @@
                     <input type="hidden" asp-for="Mode" value="@WalletSetupMode.Auto" />
                     <div data-wallet-step class="@(settlementValidationError && importExistingActive ? "d-none" : "")">
                         <div class="form-group mb-3">
-                            <label asp-for="Wallet" class="form-label">Wallet settings</label>
-                            <input asp-for="Wallet" class="form-control" placeholder="seed phrase / wallet-id" id="existingWalletInput" required data-testid="wallet-import-input"/>
+                            <label asp-for="Wallet" class="form-label">Seed phrase</label>
+                            <input asp-for="Wallet" class="form-control" placeholder="seed phrase" id="existingWalletInput" required data-testid="wallet-import-input"/>
                             <span asp-validation-for="Wallet" class="text-danger"></span>
                             <div class="form-text mt-2">
-                                <strong>Options:</strong>
-                                <ul class="mb-0">
-                                    <li><strong>BIP-39 seed phrase:</strong> Import an HD wallet from 12 or 24-word mnemonic (recommended)</li>
-                                    <li><strong>Wallet ID:</strong> Use an existing wallet from this BTCPay instance</li>
-                                </ul>
+                                Restore an HD wallet from its 12 or 24-word BIP-39 mnemonic.
                             </div>
                         </div>
                         <button type="button" class="btn btn-primary" data-settlement-next data-testid="import-wallet-next-btn">Continue</button>

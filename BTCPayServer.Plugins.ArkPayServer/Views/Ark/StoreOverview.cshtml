@@ -74,13 +74,10 @@
             <vc:icon symbol="actions-download" />
             Receive
         </a>
-        @if (Model.CanManagePrivateKeys)
-        {
-            <a asp-action="Send" asp-route-storeId="@storeId" class="btn btn-secondary d-inline-flex align-items-center gap-2" data-testid="send-btn">
-                <vc:icon symbol="actions-send" />
-                Send
-            </a>
-        }
+        <a asp-action="Send" asp-route-storeId="@storeId" class="btn btn-secondary d-inline-flex align-items-center gap-2" data-testid="send-btn">
+            <vc:icon symbol="actions-send" />
+            Send
+        </a>
         <div class="dropdown">
             <button class="btn btn-secondary dropdown-toggle" type="button" id="WalletActionsDropdownToggle" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                 Actions
@@ -90,18 +87,15 @@
                 <form asp-action="SyncWallet" method="post" asp-route-storeId="@storeId">
                     <button type="submit" class="dropdown-item" data-testid="sync-wallet-btn">Sync wallet</button>
                 </form>
-                @if (Model.CanManagePrivateKeys)
-                {
-                    <form asp-action="Rescan" asp-route-storeId="@storeId" method="post">
-                        <button type="submit"
-                                class="dropdown-item"
-                                title="Rescan the indexer and Boltz to rebuild contracts, derivation index, funds, and swaps for this wallet"
-                                data-testid="rescan-wallet-btn">
-                            Rescan wallet
-                        </button>
-                    </form>
-                }
-                @if (Model.SignerAvailable && !string.IsNullOrEmpty(Model.Wallet) && Model.CanManagePrivateKeys && Model.WalletType == WalletType.HD)
+                <form asp-action="Rescan" asp-route-storeId="@storeId" method="post">
+                    <button type="submit"
+                            class="dropdown-item"
+                            title="Rescan the indexer and Boltz to rebuild contracts, derivation index, funds, and swaps for this wallet"
+                            data-testid="rescan-wallet-btn">
+                        Rescan wallet
+                    </button>
+                </form>
+                @if (Model.SignerAvailable && !string.IsNullOrEmpty(Model.Wallet) && Model.WalletType == WalletType.HD)
                 {
                     <form method="post" asp-controller="Ark" asp-action="ShowPrivateKey" asp-route-storeId="@storeId">
                         <button type="submit" class="dropdown-item" data-testid="show-private-key-btn">
