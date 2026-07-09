@@ -1,54 +1,5 @@
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
-/// <summary>
-/// Simplified ViewModel for Send2 - no JavaScript, offchain only, auto coin selection.
-/// Form posts add/remove destinations; final submit executes transaction.
-/// </summary>
-public class Send2ViewModel
-{
-    public string StoreId { get; set; } = "";
-
-    // Available balance (spendable offchain coins only)
-    public long AvailableBalanceSats { get; set; }
-    public decimal AvailableBalanceBtc => AvailableBalanceSats / 100_000_000m;
-    public int SpendableCoinsCount { get; set; }
-
-    // Current destination input (for adding)
-    public string? NewDestination { get; set; }
-    public decimal? NewAmountBtc { get; set; }
-
-    // Toggle for multiple destinations mode
-    public bool MultipleDestinationsMode { get; set; }
-
-    // Added destinations with calculated fees
-    public List<Send2DestinationViewModel> Destinations { get; set; } = new();
-
-    // Computed totals
-    public long TotalSendingSats => Destinations.Sum(d => d.AmountSats);
-    public decimal TotalSendingBtc => TotalSendingSats / 100_000_000m;
-    public long TotalFeesSats => Destinations.Sum(d => d.FeeSats);
-    public decimal TotalFeesBtc => TotalFeesSats / 100_000_000m;
-    public long GrandTotalSats => TotalSendingSats + TotalFeesSats;
-    public decimal GrandTotalBtc => GrandTotalSats / 100_000_000m;
-
-    // Remaining after send
-    public long RemainingSats => AvailableBalanceSats - GrandTotalSats;
-    public decimal RemainingBtc => RemainingSats / 100_000_000m;
-
-    // Validation
-    public List<string> Errors { get; set; } = new();
-    public string? SuccessMessage { get; set; }
-
-    // Can execute?
-    public bool CanExecute => Destinations.Count > 0
-                              && Destinations.All(d => d.IsValid)
-                              && RemainingSats >= 0
-                              && !Errors.Any();
-
-    // Serialized state for form round-trips
-    public string? SerializedDestinations { get; set; }
-}
-
 public class Send2DestinationViewModel
 {
     public int Index { get; set; }

@@ -95,7 +95,7 @@
     <div class="d-flex px-4 py-4 mb-4 bg-tile rounded">
         <div class="flex-fill">
             <p text-translate="true" class="mb-2">Send funds using the Arkade protocol.</p>
-            <p text-translate="true" class="mb-3">Supports Arkade addresses (instant offchain), Bitcoin addresses (batch settlement), and Lightning invoices (via swap).</p>
+            <p text-translate="true" class="mb-3">Supports Arkade addresses (instant offchain), Bitcoin addresses (instant via swap, or batch settlement), and Lightning invoices (via swap).</p>
         </div>
         <button type="button" class="btn-close ms-auto" data-bs-toggle="collapse" data-bs-target="#descriptor" aria-expanded="false" aria-label="Close">
             <vc:icon symbol="close" />
@@ -388,6 +388,10 @@ else
             estimatedFee: null,
             isLightning: false,
             hasBitcoinAddress: false,
+            filledDestCount: 0,
+            // Set by the fee estimate: true when a Bitcoin destination in Arkade mode has an
+            // amount OUTSIDE the chain-swap limits and will therefore settle via Batch instead.
+            bitcoinViaBatch: false,
             userSpendType: 'Arkade', // User's choice - influences auto coin selection
             // Set when the user clicks "Max" so that the next estimate-fees
             // response can revise the amount to (gross - fee). Without this,
@@ -585,11 +589,25 @@ else
             if (lower.startsWith('ark1') || lower.startsWith('tark1')) {
                 return 'ArkAddress';
             }
-            // Bitcoin on-chain addresses (requires batch/collab exit)
+            // Bitcoin on-chain addresses (settled via swap in Arkade mode, or via batch)
             if (/^(1|3|bc1|tb1|bcrt1)[a-zA-HJ-NP-Z0-9]+$/.test(destination)) {
                 return 'BitcoinAddress';
             }
             return null;
+        }
+
+        // Re-label Bitcoin destination badges to match the effective settlement path:
+        // "Bitcoin (Swap)" for an in-limits Arkade chain swap, "Bitcoin (Batch)" when the user
+        // chose Batch or the amount fell outside the chain-swap limits (auto Arkade→Batch fallback).
+        function relabelBitcoinBadges() {
+            const viaBatch = state.userSpendType === 'Batch' || state.bitcoinViaBatch;
+            outputsContainer.querySelectorAll('.output-row').forEach(row => {
+                const destInput = row.querySelector('.destination-input');
+                const badge = row.querySelector('.destination-type-badge');
+                if (badge && detectDestinationType(destInput?.value) === 'BitcoinAddress') {
+                    badge.textContent = viaBatch ? 'Bitcoin (Batch)' : 'Bitcoin (Swap)';
+                }
+            });
         }
 
         // Update destination badges
@@ -615,7 +633,7 @@ else
                         'LightningInvoice': ['Lightning', 'text-bg-warning'],
                         'LnurlPay': ['LNURL', 'bg-info'],
                         'Bip21Uri': ['BIP21', 'bg-info'],
-                        'BitcoinAddress': ['Bitcoin (Batch)', 'bg-primary'],
+                        'BitcoinAddress': [state.userSpendType === 'Batch' ? 'Bitcoin (Batch)' : 'Bitcoin (Swap)', 'bg-primary'],
                     };
                     const [label, cls] = badgeMap[type] || ['', 'bg-secondary'];
                     badge.textContent = label;
@@ -632,6 +650,10 @@ else
 
             state.isLightning = hasLightning;
             state.hasBitcoinAddress = hasBitcoinAddress;
+            state.filledDestCount = filledDestCount;
+            // Assume in-limits (swap) until the fee estimate proves otherwise; a stale batch
+            // label from a previous destination/amount must not leak onto a new one.
+            state.bitcoinViaBatch = false;
 
             // Lightning swap constraints
             if (addOutputBtn) {
@@ -640,8 +662,11 @@ else
                 addOutputBtn.style.display = hasLightning ? 'none' : '';
             }
 
-            // Update spend type constraints (Lightning hides it, Bitcoin forces Batch)
+            // Update spend type constraints (Lightning hides it; multiple outputs with an on-chain address force Batch)
             updateSpendTypeSection();
+
+            // Re-label Bitcoin badges: the constraints above can force/restore the spend type
+            relabelBitcoinBadges();
 
             // Show error if Lightning with multiple destinations
             const lightningError = document.getElementById('lightning-multi-dest-error');
@@ -708,6 +733,24 @@ else
                 } else {
                     state.estimatedFee = data.estimatedFeeSats;
                     sendBtn.disabled = false;
+
+                    // A Bitcoin destination in Arkade mode settles via a chain swap only when the
+                    // amount is within Boltz's chain-swap limits; otherwise the backend auto-falls
+                    // back to Batch (no error). Reflect that fallback in the badge, spend-type
+                    // label, and fee shown here.
+                    //
+                    // Recompute the destination flags from the live outputs rather than trusting
+                    // state.hasBitcoinAddress: the shared debounced input handler can coalesce a
+                    // rapid destination+amount edit into a single amount event, so
+                    // updateDestinationBadges() may not have run and the state can be stale.
+                    const filledOutputs = outputs.filter(o => o.destination);
+                    state.filledDestCount = filledOutputs.length;
+                    state.hasBitcoinAddress = filledOutputs
+                        .some(o => detectDestinationType(o.destination) === 'BitcoinAddress');
+                    state.bitcoinViaBatch = state.hasBitcoinAddress
+                        && state.userSpendType === 'Arkade'
+                        && !data.isChainSwap;
+                    relabelBitcoinBadges();
 
                     // Apply pending "Max" adjustment: when the user clicked
                     // Max we filled the gross balance so the fee estimator
@@ -782,15 +825,17 @@ else
                 spendTypeSection.style.display = 'none';
                 return;
             }
-            // Force Batch for Bitcoin on-chain addresses
-            if (state.hasBitcoinAddress) {
-                spendTypeSection.style.display = '';
+            spendTypeSection.style.display = '';
+            // A Bitcoin address keeps the user's spend type: Arkade settles it via a chain
+            // swap (single output only), so only multiple outputs with an on-chain address
+            // force Batch.
+            if (state.hasBitcoinAddress && state.filledDestCount > 1) {
                 if (spendTypeBatch) spendTypeBatch.checked = true;
                 if (spendTypeArkade) { spendTypeArkade.checked = false; spendTypeArkade.disabled = true; }
                 if (!state._savedSpendType) state._savedSpendType = state.userSpendType;
                 var wasAlreadyBatch = state.userSpendType === 'Batch';
                 state.userSpendType = 'Batch';
-                spendTypeSummary.textContent = 'Batch (required for on-chain address)';
+                spendTypeSummary.textContent = 'Batch (required for multiple outputs with an on-chain address)';
                 // Re-select coins for Batch mode if switching from Arkade
                 if (!wasAlreadyBatch && state.coinSelectionMode === 'auto') {
                     const outputs = getOutputs();
@@ -801,16 +846,21 @@ else
                 }
                 return;
             }
-            spendTypeSection.style.display = '';
             if (spendTypeArkade) spendTypeArkade.disabled = false;
-            // Restore previous spend type if it was overridden by Bitcoin address
+            // Restore previous spend type if it was overridden by the multi-output constraint
             if (state._savedSpendType) {
                 state.userSpendType = state._savedSpendType;
                 delete state._savedSpendType;
                 const radio = state.userSpendType === 'Batch' ? spendTypeBatch : spendTypeArkade;
                 if (radio) radio.checked = true;
             }
-            spendTypeSummary.textContent = state.userSpendType;
+            if (state.hasBitcoinAddress && state.userSpendType === 'Arkade') {
+                spendTypeSummary.textContent = state.bitcoinViaBatch
+                    ? 'Batch (amount outside swap limits)'
+                    : 'Arkade (Bitcoin via swap)';
+            } else {
+                spendTypeSummary.textContent = state.userSpendType;
+            }
         }
 
         // Get coins sorted by expiry (closest first)
@@ -889,7 +939,9 @@ else
         function getEffectiveSpendType(needsRecovery) {
             if (needsRecovery) return 'Batch (Recovery)';
             if (state.isLightning) return 'Lightning Swap';
-            if (state.hasBitcoinAddress) return 'Batch';
+            // Bitcoin in Arkade mode: chain swap when within limits, else auto-falls back to Batch.
+            if (state.hasBitcoinAddress && state.userSpendType !== 'Batch')
+                return state.bitcoinViaBatch ? 'Batch' : 'Bitcoin Swap';
             return state.userSpendType;
         }
 
@@ -944,7 +996,7 @@ else
                 if (feeData.feeDescription) {
                     html += `<br><span class="text-muted small">${feeData.feeDescription}</span>`;
                 }
-                if (feeData.isLightning) {
+                if (feeData.isLightning || feeData.isChainSwap) {
                     html += `<br><span class="text-muted small">`;
                     html += `Service: ${feeData.feePercentage.toFixed(2)}%`;
                     html += ` + Miner: ${feeData.minerFeeSats} sats`;
@@ -975,6 +1027,15 @@ else
             const amounts = outputs.map(o => o.amountBtc ? Math.round(o.amountBtc * 100000000) : null);
             if (amounts.every(a => a !== null)) {
                 totalSats = amounts.reduce((sum, a) => sum + a, 0);
+            }
+
+            // A Bitcoin address in Arkade mode settles via a chain swap, which runs its
+            // own coin selection server-side — keep the Arkade-style (non-recoverable)
+            // selection instead of the server's batch-flavored suggestion.
+            if (destType === 'BitcoinAddress' && state.userSpendType === 'Arkade') {
+                autoSelectCoins(totalSats);
+                estimateFees();
+                return;
             }
 
             try {
@@ -1446,7 +1507,8 @@ else
         spendTypeArkade?.addEventListener('change', function() {
             if (this.checked) {
                 state.userSpendType = 'Arkade';
-                spendTypeSummary.textContent = 'Arkade';
+                // Refresh badge labels + summary (Bitcoin reads as swap in Arkade mode)
+                updateDestinationBadges();
 
                 // Re-select coins based on new spend type if in auto mode
                 if (state.coinSelectionMode === 'auto') {
@@ -1462,7 +1524,8 @@ else
         spendTypeBatch?.addEventListener('change', function() {
             if (this.checked) {
                 state.userSpendType = 'Batch';
-                spendTypeSummary.textContent = 'Batch';
+                // Refresh badge labels + summary (Bitcoin reads as batch settlement)
+                updateDestinationBadges();
 
                 // Re-select coins based on new spend type if in auto mode
                 if (state.coinSelectionMode === 'auto') {

@@ -28,7 +28,6 @@ public class PageRenderTests : PlaywrightBaseTest
     [InlineData("receive")]
     [InlineData("send")]
     [InlineData("settings")]
-    [InlineData("spend")]
     [InlineData("contracts")]
     [InlineData("swaps")]
     public async Task PluginPage_Returns200(string subpath)

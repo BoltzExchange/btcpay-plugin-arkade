@@ -431,6 +431,38 @@ public class ArkGreenfieldController(
                         $"{limits.SubmarineFeePercentage * 100m:F2}% + {limits.SubmarineMinerFee} sats miner fee";
                     return Ok(response);
                 }
+
+                // Arkade-mode Bitcoin destination: within the chain-swap limits it settles via an
+                // Arkade→BTC chain swap (same mechanism as automatic mainchain settlement). Outside
+                // those limits (or when chain swaps are unavailable) the /send endpoint falls back to
+                // a Batch settlement, so mirror that here by falling through to the Batch estimate
+                // rather than returning an error.
+                if (string.Equals(request.SpendType, "Arkade", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (btcDest, _, outputType) = ArkSpendHelpers.ParseOutputDestination(dest, serverInfo.Network);
+                    if (btcDest != null && outputType == ArkTxOutType.Onchain)
+                    {
+                        // Same source as MainchainSettlementService.GetMainchainSettlementLimits
+                        var chainLimits = boltzLimitsValidator != null
+                            ? await boltzLimitsValidator.GetChainLimitsAsync(isBtcToArk: false, cancellationToken)
+                            : null;
+                        var chainAmountSats = request.Outputs[0].AmountSats ?? 0L;
+                        if (chainLimits != null &&
+                            chainAmountSats >= chainLimits.MinAmount &&
+                            chainAmountSats <= chainLimits.MaxAmount)
+                        {
+                            response.IsChainSwap = true;
+                            response.FeePercentage = chainLimits.FeePercentage * 100m;
+                            response.MinerFeeSats = chainLimits.MinerFee;
+                            response.EstimatedFeeSats =
+                                (long)Math.Ceiling(chainAmountSats * chainLimits.FeePercentage) + chainLimits.MinerFee;
+                            response.FeeDescription =
+                                $"{chainLimits.FeePercentage * 100m:F2}% + {chainLimits.MinerFee} sats miner fee";
+                            return Ok(response);
+                        }
+                        // Outside chain-swap limits (or unavailable): fall through to the Batch estimate.
+                    }
+                }
             }
 
             // Non-Lightning: resolve coins (auto or explicit), then build outputs and estimate.

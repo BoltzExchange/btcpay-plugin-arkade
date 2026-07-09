@@ -69,7 +69,7 @@ public class FundedWalletTests : PlaywrightBaseTest
                      feeJson.Value.TryGetProperty("estimatedFeeSats", out _);
         Assert.True(hasFee, $"estimate-fees response missing a fee field: {feeJson}");
 
-        // Refresh outpoints immediately before build-intent; batch settlement
+        // Refresh outpoints immediately before the send; batch settlement
         // can change coin state between the initial poll and the send.
         outpoints = await PollForSpendableCoinsAsync(
             storeId, "ArkAddress", 40_000, TimeSpan.FromMinutes(1));
@@ -77,8 +77,10 @@ public class FundedWalletTests : PlaywrightBaseTest
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         token = (await GetAntiforgeryTokenAsync()) ?? "";
+        // Submit the /send wizard: auto coin selection re-selects from the
+        // available unlocked set if the polled outpoints drifted under batching.
         var sendResp = await Page.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/build-intent").AbsoluteUri,
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
             new APIRequestContextOptions
             {
                 Headers = new Dictionary<string, string>
@@ -86,14 +88,14 @@ public class FundedWalletTests : PlaywrightBaseTest
                     ["RequestVerificationToken"] = token,
                     ["Content-Type"] = "application/x-www-form-urlencoded"
                 },
-                Data = $"StoreId={Uri.EscapeDataString(storeId)}" +
-                       $"&VtxoOutpointsRaw={Uri.EscapeDataString(string.Join(",", outpoints))}" +
+                Data = "CoinSelectionMode=auto&SpendType=Arkade" +
+                       string.Concat(outpoints.Select(o => $"&selectedVtxoOutpoints={Uri.EscapeDataString(o)}")) +
                        $"&Outputs[0].Destination={Uri.EscapeDataString(recipientAddr)}" +
                        $"&Outputs[0].AmountBtc={(40_000 / 100_000_000m).ToString(System.Globalization.CultureInfo.InvariantCulture)}"
             });
-        Assert.True(sendResp.Ok, $"build-intent returned {sendResp.Status}");
+        Assert.True(sendResp.Ok, $"send returned {sendResp.Status}");
         var sendBody = await sendResp.TextAsync();
-        Assert.DoesNotContain("No valid VTXOs selected", sendBody);
+        Assert.DoesNotContain("No coins selected", sendBody);
 
         // Approval should leave the payout waiting for manual payment.
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);

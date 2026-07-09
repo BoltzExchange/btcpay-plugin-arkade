@@ -724,299 +724,8 @@ public class ArkController(
         return boardingContract.GetOnchainAddress(terms.Network).ToString();
     }
 
-    /// <summary>
-    /// The transfer route redirects to the Send wizard.
-    /// </summary>
-    [HttpGet("stores/{storeId}/spend")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public IActionResult SpendOverview(string storeId, string[]? destinations, string? vtxoOutpoints)
-    {
-        // Preserve selected outputs/destinations when entering the Send wizard.
-        var vtxos = vtxoOutpoints;
-        var destinationsParam = destinations != null && destinations.Length > 0
-            ? string.Join(",", destinations)
-            : null;
-
-        return RedirectToAction(nameof(Send), new { storeId, vtxos, destinations = destinationsParam });
-    }
-
-    private async Task<IntentBuilderViewModel> BuildIntentBuilderViewModel(
-        string storeId,
-        string walletId,
-        string vtxoOutpointsRaw,
-        bool isIntent,
-        ArkBalancesViewModel balances,
-        CancellationToken token)
-    {
-        var model = new IntentBuilderViewModel
-        {
-            StoreId = storeId,
-            IsIntent = isIntent,
-            VtxoOutpointsRaw = vtxoOutpointsRaw,
-            Balances = balances,
-            LightningAvailable = true // TODO: Check if Lightning is configured
-        };
-
-        // Parse outpoints and load VTXO details
-        var outpointStrings = vtxoOutpointsRaw.Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var parsedOutpoints = ParseOutpoints(outpointStrings);
-
-        var selectedVtxos = await vtxoStorage.GetVtxos(
-            outpoints: parsedOutpoints.ToList(),
-            walletIds: [walletId],
-            includeSpent: true,
-            cancellationToken: token);
-
-        foreach (var vtxo in selectedVtxos)
-        {
-            model.SelectedVtxos.Add(new SelectedVtxoViewModel
-            {
-                Outpoint = $"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}",
-                TransactionId = vtxo.TransactionId,
-                OutputIndex = vtxo.TransactionOutputIndex,
-                Amount = (long)vtxo.Amount,
-                ExpiresAt = vtxo.ExpiresAt,
-                IsRecoverable = vtxo.Swept,
-                CanSpendOffchain = !vtxo.IsSpent() && !vtxo.Swept
-            });
-        }
-
-        model.TotalSelectedAmount = model.SelectedVtxos.Sum(v => v.Amount);
-
-        return model;
-    }
-
-    [HttpPost("stores/{storeId}/spend")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> SpendOverview(SpendOverviewViewModel model, CancellationToken token)
-    {
-        if (string.IsNullOrWhiteSpace(model.Destination))
-            return BadRequest();
-
-        var store = HttpContext.GetStoreData();
-        if (store == null)
-            return NotFound();
-
-        var disposableLock = default(IDisposable);
-        try
-        {
-            var payout = Uri.TryCreate(model.Destination, UriKind.Absolute, out var uriResult)
-                ? uriResult.ParseQueryString().Get("payout")
-                : null;
-            if (!string.IsNullOrEmpty(payout))
-            {
-                disposableLock = await arkPayoutHandler.PayoutLocker.LockOrNullAsync(payout, 0, token);
-                if (disposableLock is null)
-                {
-                    TempData[WellKnownTempData.ErrorMessage] = "Payment failed: the payout is locked";
-                    return RedirectToAction(nameof(SpendOverview),
-                        new {storeId = store.Id, destinations = model.PrefilledDestination});
-
-                }
-            }
-
-            var maybeProof = await arkadeSpendingService.Spend(store, model.Destination, token);
-            // Check if destination is a URI and if it has a payout querystring, extract value.
-            if (!string.IsNullOrEmpty(payout))
-            {
-                // For a bitcoin destination the spend result is an Ark->BTC chain-swap id, not a
-                // delivered-funds txid, so only mark the payout paid once it resolves to a real
-                // transaction; a swap id keeps it InProgress until settlement.
-                var proof = ArkPayoutProof.FromSpendResult(maybeProof);
-                var result = await pullPaymentHostedService.MarkPaid(new MarkPayoutRequest()
-                {
-                    PayoutId = payout,
-                    Proof = arkPayoutHandler.SerializeProof(proof),
-                    State = proof.ResolvedPayoutState ?? BTCPayServer.Client.Models.PayoutState.Completed
-                });
-
-                TempData[WellKnownTempData.SuccessMessage] =
-                    $"Payment sent to {model.Destination} with payout {payout} result {result}";
-            }
-            else
-            {
-                TempData[WellKnownTempData.SuccessMessage] = $"Payment sent to {model.Destination}";
-            }
-
-            model.PrefilledDestination.Remove(model.Destination);
-            return RedirectToAction(nameof(SpendOverview),
-                new {storeId = store.Id, destinations = model.PrefilledDestination});
-        }
-        catch (IncompleteArkadeSetupException)
-        {
-            TempData[WellKnownTempData.ErrorMessage] = "Payment failed: incomplete arkade setup!";
-            return RedirectToAction(nameof(GettingStarted), new {storeId = store.Id});
-        }
-        catch (MalformedPaymentDestination)
-        {
-            TempData[WellKnownTempData.ErrorMessage] = "Payment failed: malformed destination!";
-            return RedirectToAction(nameof(SpendOverview),
-                new {storeId = store.Id, destinations = model.PrefilledDestination});
-        }
-        catch (ArkadePaymentFailedException e)
-        {
-            TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(e, "Payment failed: reason");
-            return RedirectToAction(nameof(SpendOverview),
-                new {storeId = store.Id, destinations = model.PrefilledDestination});
-        }
-        finally
-        {
-            if(disposableLock is not null)
-            {
-                disposableLock.Dispose();
-            }
-        }
-    }
-
-    [HttpPost("stores/{storeId}/build-intent")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> BuildIntent(string storeId, IntentBuilderViewModel model, CancellationToken token)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
-        if (errorResult != null) return errorResult;
-
-        // Get the selected coins
-        var outpointStrings = model.VtxoOutpointsRaw?.Split(',', StringSplitOptions.RemoveEmptyEntries) ?? [];
-        var selectedCoins = await GetCoinsForOutpoints(config!.WalletId!, outpointStrings.ToList(), token);
-
-        if (selectedCoins.Count == 0)
-        {
-            model.Errors.Add("No valid VTXOs selected.");
-            model.Balances = await GetArkBalances(config.WalletId!, token);
-            await ReloadSelectedVtxos(model, config.WalletId!, token);
-            return View("IntentBuilder", model);
-        }
-
-        var totalInputAmount = selectedCoins.Sum(c => c.TxOut.Value.Satoshi);
-
-        // Get valid outputs (non-empty destinations)
-        var validOutputs = model.Outputs.Where(o => !string.IsNullOrWhiteSpace(o.Destination)).ToList();
-
-        // Check for Lightning - only single output allowed
-        var lightningOutputs = validOutputs.Where(o =>
-            o.Destination.StartsWith("ln", StringComparison.OrdinalIgnoreCase) ||
-            o.Destination.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)).ToList();
-
-        if (lightningOutputs.Any() && validOutputs.Count > 1)
-        {
-            model.Errors.Add("Lightning payments only support a single output.");
-            model.Balances = await GetArkBalances(config!.WalletId!, token);
-            await ReloadSelectedVtxos(model, config.WalletId!, token);
-            return View("IntentBuilder", model);
-        }
-
-        try
-        {
-            // If single Lightning output, use existing spend flow
-            if (lightningOutputs.Count == 1)
-            {
-                var lnDestination = lightningOutputs[0].Destination
-                    .Replace("lightning:", "", StringComparison.OrdinalIgnoreCase);
-                await arkadeSpendingService.Spend(store!, lnDestination, token);
-                TempData[WellKnownTempData.SuccessMessage] = "Lightning payment initiated successfully.";
-                return RedirectToAction(nameof(Vtxos), new { storeId });
-            }
-
-            // Build ArkTxOut array from outputs
-            var serverInfo = await clientTransport.GetServerInfoAsync(token);
-            var arkOutputs = new List<ArkTxOut>();
-
-            foreach (var output in validOutputs)
-            {
-                var parseResult = ParseOutputDestination(output, serverInfo.Network);
-                if (parseResult.Destination == null)
-                {
-                    output.Error = "Invalid destination address.";
-                    model.Errors.Add($"Invalid destination: {output.Destination}");
-                    continue;
-                }
-
-                // Amount priority: destination-specified > user-specified > (single output: send all)
-                var outputAmount = parseResult.Amount ?? (output.AmountBtc.HasValue ? Money.Coins(output.AmountBtc.Value) : null);
-
-                if (outputAmount == null || outputAmount == Money.Zero)
-                {
-                    if (validOutputs.Count == 1)
-                    {
-                        // Single output with no amount specified anywhere - send all
-                        outputAmount = Money.Satoshis(totalInputAmount);
-                    }
-                    else
-                    {
-                        // Multi-output requires explicit amount
-                        output.Error = "Amount is required.";
-                        model.Errors.Add($"Amount is required for output: {output.Destination}");
-                        continue;
-                    }
-                }
-
-                // Output type is determined by address type:
-                // - Ark address = VTXO (offchain)
-                // - Bitcoin address = Onchain
-                arkOutputs.Add(new ArkTxOut(parseResult.OutputType, outputAmount, parseResult.Destination));
-            }
-
-            if (model.Errors.Any())
-            {
-                model.Balances = await GetArkBalances(config.WalletId!, token);
-                await ReloadSelectedVtxos(model, config.WalletId!, token);
-                return View("IntentBuilder", model);
-            }
-
-            // Execute the spend with selected coins
-            // If no outputs specified, SpendingService will send everything as change to self
-            var txId = await arkadeSpender.Spend(config.WalletId!, selectedCoins.ToArray(), arkOutputs.ToArray(), token);
-
-            // Poll for VTXO updates
-            var activeContracts = await contractStorage.GetContracts(walletIds: [config.WalletId!], isActive: true, cancellationToken: token);
-            await vtxoSyncService.PollScriptsForVtxos(activeContracts.Select(c => c.Script).ToHashSet(), PostOpVtxoPollSince(), token);
-
-            TempData[WellKnownTempData.SuccessMessage] = $"Successfully joined batch. Your VTXOs will be updated in the next round. Transaction ID: {txId}";
-
-            return RedirectToAction(nameof(StoreOverview), new { storeId });
-        }
-        catch (Exception ex)
-        {
-            model.Errors.Add($"Failed to build: {ex.Message}");
-            model.Balances = await GetArkBalances(config!.WalletId!, token);
-            await ReloadSelectedVtxos(model, config.WalletId!, token);
-            return View("IntentBuilder", model);
-        }
-    }
-
     private static (IDestination? Destination, Money? Amount, ArkTxOutType OutputType) ParseOutputDestination(SpendOutputViewModel output, Network network)
         => ArkSpendHelpers.ParseOutputDestination(output.Destination, network);
-
-    private async Task ReloadSelectedVtxos(IntentBuilderViewModel model, string walletId, CancellationToken token)
-    {
-        model.SelectedVtxos.Clear();
-        if (string.IsNullOrEmpty(model.VtxoOutpointsRaw)) return;
-
-        var outpointStrings = model.VtxoOutpointsRaw.Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var parsedOutpoints = ParseOutpoints(outpointStrings);
-
-        var selectedVtxos = await vtxoStorage.GetVtxos(
-            outpoints: parsedOutpoints.ToList(),
-            walletIds: [walletId],
-            includeSpent: true,
-            cancellationToken: token);
-
-        foreach (var vtxo in selectedVtxos)
-        {
-            model.SelectedVtxos.Add(new SelectedVtxoViewModel
-            {
-                Outpoint = $"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}",
-                TransactionId = vtxo.TransactionId,
-                OutputIndex = vtxo.TransactionOutputIndex,
-                Amount = (long)vtxo.Amount,
-                ExpiresAt = vtxo.ExpiresAt,
-                IsRecoverable = vtxo.Swept,
-                CanSpendOffchain = !vtxo.IsSpent() && !vtxo.Swept
-            });
-        }
-
-        model.TotalSelectedAmount = model.SelectedVtxos.Sum(v => v.Amount);
-    }
 
     [HttpPost("stores/{storeId}/estimate-fees")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
@@ -1061,6 +770,37 @@ public class ArkController(
                     }
 
                     return Json(response);
+                }
+
+                // Arkade-mode Bitcoin destination: within the chain-swap limits it settles via an
+                // Arkade→BTC chain swap (same mechanism as automatic mainchain settlement). When the
+                // amount is outside those limits (or chain swaps are unavailable) the /send endpoint
+                // silently falls back to a Batch settlement, so mirror that here by falling through
+                // to the Batch fee estimate below instead of erroring — keeping the wizard usable.
+                if (string.Equals(request.SpendType, "Arkade", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parseResult = ParseOutputDestination(new SpendOutputViewModel { Destination = dest }, serverInfo.Network);
+                    if (parseResult.Destination != null && parseResult.OutputType == ArkTxOutType.Onchain)
+                    {
+                        // Same source as MainchainSettlementService.GetMainchainSettlementLimits
+                        var chainLimits = boltzLimitsValidator != null
+                            ? await boltzLimitsValidator.GetChainLimitsAsync(isBtcToArk: false, token)
+                            : null;
+                        if (chainLimits != null)
+                        {
+                            var amount = request.Outputs[0].AmountSats ?? request.TotalInputSats;
+                            if (amount > 0 && amount >= chainLimits.MinAmount && amount <= chainLimits.MaxAmount)
+                            {
+                                response.IsChainSwap = true;
+                                response.FeePercentage = chainLimits.FeePercentage * 100; // Convert to percentage for display
+                                response.MinerFeeSats = chainLimits.MinerFee;
+                                response.EstimatedFeeSats = (long)Math.Ceiling(amount * chainLimits.FeePercentage) + chainLimits.MinerFee;
+                                response.FeeDescription = $"{chainLimits.FeePercentage * 100:F2}% + {chainLimits.MinerFee} sats miner fee";
+                                return Json(response);
+                            }
+                        }
+                        // Outside chain-swap limits (or unavailable): fall through to the Batch fee estimate.
+                    }
                 }
             }
 
@@ -1843,9 +1583,11 @@ public class ArkController(
 
                 await arkadeSpendingService.Spend(store!, lnDestination, token);
 
-                // Mark payout as paid if this fulfills a payout
+                // Mark payout as paid if this fulfills a payout. A Lightning send returns no
+                // spend id, so this completes the payout (submarine-swap tracking would require
+                // ArkadeSpendingService.Spend to surface the swap id — see MarkPayoutFromSpendResult).
                 if (!string.IsNullOrEmpty(lnOutput.PayoutId))
-                    await MarkPayoutPaid(lnOutput.PayoutId, null, token);
+                    await MarkPayoutFromSpendResult(lnOutput.PayoutId, null, token);
 
                 return RedirectWithSuccess(nameof(StoreOverview), "Lightning payment sent!", new { storeId });
             }
@@ -1901,8 +1643,50 @@ public class ArkController(
             return View("Send", model);
         }
 
-        // Determine if batch is required (on-chain outputs or user preference)
+        // On-chain (bitcoin) destination handling:
+        //  - Arkade mode, a single output, and an amount within the chain-swap limits → settle via
+        //    an ARK→BTC chain swap (same mechanism as a Lightning send), initiated instantly.
+        //  - Anything the swap can't take (Batch chosen, multiple outputs, Boltz unavailable, or an
+        //    amount outside the swap limits) falls through to the batch path below.
         var hasOnchainOutput = arkOutputs.Any(o => o.Type == ArkTxOutType.Onchain);
+
+        if (hasOnchainOutput && !preferBatch && arkOutputs.Count == 1)
+        {
+            var settlementSats = arkOutputs[0].Value.Satoshi;
+            var chainLimits = boltzLimitsValidator is null
+                ? null
+                : await boltzLimitsValidator.GetChainLimitsAsync(isBtcToArk: false, token);
+            var withinChainSwapLimits = chainLimits is not null
+                && settlementSats >= chainLimits.MinAmount
+                && settlementSats <= chainLimits.MaxAmount;
+
+            if (withinChainSwapLimits)
+            {
+                try
+                {
+                    var btcOutput = validOutputs[0];
+                    // Chain swaps run their own coin selection, so the selected VTXOs are not passed as explicit inputs here.
+                    var swapId = await arkadeSpendingService.Spend(store!, btcOutput.Destination, settlementSats, null, token);
+
+                    // A chain swap only *initiates* the transfer, so the payout stays InProgress
+                    // (carrying the swap id) until it settles; it must not be marked delivered yet.
+                    if (!string.IsNullOrEmpty(btcOutput.PayoutId))
+                        await MarkPayoutFromSpendResult(btcOutput.PayoutId, swapId, token);
+
+                    return RedirectWithSuccess(nameof(StoreOverview),
+                        "Bitcoin settlement initiated via chain swap. Funds arrive once the swap settles.",
+                        new { storeId });
+                }
+                catch (Exception ex)
+                {
+                    model.Errors.Add($"Bitcoin settlement failed: {ex.Message}");
+                    return View("Send", model);
+                }
+            }
+            // Outside the chain-swap limits (or Boltz unavailable) → fall through to batch.
+        }
+
+        // Batch settles on-chain outputs the chain swap didn't take, plus any explicit Batch send.
         var useBatch = preferBatch || hasOnchainOutput;
 
         // Execute the spend
@@ -1958,7 +1742,7 @@ public class ArkController(
                 // Mark payouts as paid if any outputs fulfill payouts (no txId yet — assigned at batch time)
                 foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
                 {
-                    await MarkPayoutPaid(output.PayoutId!, null, token);
+                    await MarkPayoutFromSpendResult(output.PayoutId!, null, token);
                 }
 
                 return RedirectWithSuccess(nameof(Intents),
@@ -1981,7 +1765,7 @@ public class ArkController(
                 // Mark payouts as paid if any outputs fulfill payouts
                 foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
                 {
-                    await MarkPayoutPaid(output.PayoutId!, txId, token);
+                    await MarkPayoutFromSpendResult(output.PayoutId!, txId.ToString(), token);
                 }
 
                 return RedirectWithSuccess(nameof(StoreOverview), $"Transaction sent successfully! TxId: {txId}", new { storeId });
@@ -3565,7 +3349,7 @@ public class ArkController(
             {
                 case "build-intent":
                     // Redirect to spend/intent builder with selected VTXOs
-                    return RedirectToAction(nameof(SpendOverview), new { storeId, vtxoOutpoints = string.Join(",", selectedItems) });
+                    return RedirectToAction(nameof(Send), new { storeId, vtxos = string.Join(",", selectedItems) });
 
                 default:
                     return RedirectWithError(nameof(Contracts), $"Unknown command: {command}", new { storeId });
@@ -3648,263 +3432,31 @@ public class ArkController(
 
     #endregion
 
-    #region Send2 - Simplified Send (No JavaScript)
+    #region Send helpers - destination parsing, LNURL resolution, payouts
 
     /// <summary>
-    /// Send2 - Deprecated. Redirects to unified Send wizard.
+    /// Marks a payout from the result of a spend. A real on-ledger txid completes the payout;
+    /// a chain-swap transfer id leaves it InProgress until the swap settles, so undelivered funds
+    /// are never reported as paid. Mirrors <see cref="ArkAutomatedPayoutProcessor"/>'s proof handling.
     /// </summary>
-    [HttpGet("stores/{storeId}/send2")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public IActionResult Send2(
-        string storeId,
-        string? destinations = null)
-    {
-        return RedirectToAction(nameof(Send), new { storeId, destinations });
-    }
-
-    /// <summary>
-    /// Send2 - Add a destination.
-    /// </summary>
-    [HttpPost("stores/{storeId}/send2/add")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Send2Add(
-        string storeId,
-        [FromForm] Send2ViewModel model,
-        CancellationToken token = default)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
-        if (errorResult != null)
-            return errorResult;
-
-        // Restore state
-        var newModel = await BuildSend2ViewModel(storeId, config!.WalletId!, token);
-        newModel.MultipleDestinationsMode = model.MultipleDestinationsMode;
-        RestoreSend2Destinations(newModel, model.SerializedDestinations);
-
-        // Parse and add new destination
-        if (!string.IsNullOrWhiteSpace(model.NewDestination))
-        {
-            try
-            {
-                var serverInfo = await clientTransport.GetServerInfoAsync(token);
-                var parsed = await ParseSend2DestinationAsync(model.NewDestination.Trim(), model.NewAmountBtc, serverInfo.Network, token);
-
-                if (!parsed.IsValid)
-                {
-                    newModel.Errors.Add(parsed.Error ?? "Invalid destination");
-                }
-                else
-                {
-                    parsed.Index = newModel.Destinations.Count;
-                    newModel.Destinations.Add(parsed);
-
-                    // Estimate fees for all destinations
-                    await EstimateSend2Fees(newModel, config.WalletId!, token);
-                }
-            }
-            catch (Exception ex)
-            {
-                newModel.Errors.Add($"Failed to parse destination: {ex.Message}");
-            }
-        }
-        else
-        {
-            newModel.Errors.Add("Please enter a destination");
-        }
-
-        // Preserve user input on errors so the form re-renders with what they typed
-        if (newModel.Errors.Any())
-        {
-            newModel.NewDestination = model.NewDestination;
-            newModel.NewAmountBtc = model.NewAmountBtc;
-        }
-
-        // Serialize state for next round-trip
-        newModel.SerializedDestinations = SerializeSend2Destinations(newModel.Destinations);
-
-        return View("Send2", newModel);
-    }
-
-    /// <summary>
-    /// Send2 - Remove a destination by index.
-    /// </summary>
-    [HttpPost("stores/{storeId}/send2/remove")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Send2Remove(
-        string storeId,
-        [FromForm] Send2ViewModel model,
-        [FromForm] int removeIndex,
-        CancellationToken token = default)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
-        if (errorResult != null)
-            return errorResult;
-
-        // Restore state
-        var newModel = await BuildSend2ViewModel(storeId, config!.WalletId!, token);
-        newModel.MultipleDestinationsMode = model.MultipleDestinationsMode;
-        RestoreSend2Destinations(newModel, model.SerializedDestinations);
-
-        // Remove destination
-        if (removeIndex >= 0 && removeIndex < newModel.Destinations.Count)
-        {
-            newModel.Destinations.RemoveAt(removeIndex);
-
-            // Re-index remaining destinations
-            for (int i = 0; i < newModel.Destinations.Count; i++)
-            {
-                newModel.Destinations[i].Index = i;
-            }
-
-            // Re-estimate fees
-            if (newModel.Destinations.Count > 0)
-            {
-                await EstimateSend2Fees(newModel, config.WalletId!, token);
-            }
-        }
-
-        // Serialize state
-        newModel.SerializedDestinations = SerializeSend2Destinations(newModel.Destinations);
-
-        return View("Send2", newModel);
-    }
-
-    /// <summary>
-    /// Send2 - Execute the transaction.
-    /// </summary>
-    [HttpPost("stores/{storeId}/send2/execute")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Send2Execute(
-        string storeId,
-        [FromForm] Send2ViewModel model,
-        CancellationToken token = default)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: false);
-        if (errorResult != null)
-            return errorResult;
-
-        // Restore state
-        var newModel = await BuildSend2ViewModel(storeId, config!.WalletId!, token);
-        newModel.MultipleDestinationsMode = model.MultipleDestinationsMode;
-        RestoreSend2Destinations(newModel, model.SerializedDestinations);
-
-        if (newModel.Destinations.Count == 0)
-        {
-            newModel.Errors.Add("No destinations to send to");
-            return View("Send2", newModel);
-        }
-
-        // Re-estimate fees to ensure we have current values
-        await EstimateSend2Fees(newModel, config.WalletId!, token);
-
-        // Validate we have enough balance
-        if (newModel.RemainingSats < 0)
-        {
-            newModel.Errors.Add($"Insufficient balance. Need {newModel.GrandTotalSats:#,0} sats, have {newModel.AvailableBalanceSats:#,0} sats");
-            newModel.SerializedDestinations = SerializeSend2Destinations(newModel.Destinations);
-            return View("Send2", newModel);
-        }
-
-        try
-        {
-            // Check for Lightning destinations
-            var lightningDests = newModel.Destinations
-                .Where(d => d.Type == Send2DestinationType.LightningInvoice || d.Type == Send2DestinationType.Bip21Lightning)
-                .ToList();
-
-            if (lightningDests.Count > 0)
-            {
-                if (newModel.Destinations.Count > 1)
-                {
-                    newModel.Errors.Add("Lightning payments can only be sent one at a time");
-                    newModel.SerializedDestinations = SerializeSend2Destinations(newModel.Destinations);
-                    return View("Send2", newModel);
-                }
-
-                // Execute Lightning payment via ArkadeSpendingService
-                var lnDest = lightningDests[0];
-                var lnDestination = lnDest.ResolvedAddress ?? lnDest.RawDestination;
-                await arkadeSpendingService.Spend(store!, lnDestination, token);
-
-                // Mark payout as paid if this was initiated from payout handler
-                if (!string.IsNullOrEmpty(lnDest.PayoutId))
-                {
-                    await MarkPayoutPaid(lnDest.PayoutId, null, token);
-                }
-
-                TempData[WellKnownTempData.SuccessMessage] = $"Lightning payment of {lnDest.AmountSats:#,0} sats initiated";
-                return RedirectToAction(nameof(StoreOverview), new { storeId });
-            }
-
-            // Build Ark outputs
-            var outputs = new List<ArkTxOut>();
-            foreach (var dest in newModel.Destinations)
-            {
-                if (dest.Type == Send2DestinationType.ArkAddress || dest.Type == Send2DestinationType.Bip21Ark)
-                {
-                    var arkAddr = ArkAddress.Parse(dest.ResolvedAddress!);
-                    outputs.Add(new ArkTxOut(ArkTxOutType.Vtxo, Money.Satoshis(dest.AmountSats), arkAddr));
-                }
-                else
-                {
-                    newModel.Errors.Add($"Unsupported destination type: {dest.Type}");
-                    newModel.SerializedDestinations = SerializeSend2Destinations(newModel.Destinations);
-                    return View("Send2", newModel);
-                }
-            }
-
-            // Execute Ark spend (auto coin selection)
-            if (outputs.Count > 0)
-            {
-                var txId = await arkadeSpender.Spend(
-                    config.WalletId!,
-                    outputs.ToArray(),
-                    token);
-
-                // Poll for VTXO updates
-                var activeContracts = await contractStorage.GetContracts(walletIds: [config.WalletId!], isActive: true, cancellationToken: token);
-                await vtxoSyncService.PollScriptsForVtxos(activeContracts.Select(c => c.Script).ToHashSet(), PostOpVtxoPollSince(), token);
-
-                // Mark payouts as paid if this was initiated from payout handler
-                foreach (var dest in newModel.Destinations.Where(d => !string.IsNullOrEmpty(d.PayoutId)))
-                {
-                    await MarkPayoutPaid(dest.PayoutId!, txId, token);
-                }
-
-                TempData[WellKnownTempData.SuccessMessage] = $"Sent {newModel.TotalSendingSats:#,0} sats to {outputs.Count} destination(s). TxId: {txId}";
-            }
-
-            return RedirectToAction(nameof(StoreOverview), new { storeId });
-        }
-        catch (Exception ex)
-        {
-            newModel.Errors.Add($"Transaction failed: {ex.Message}");
-            newModel.SerializedDestinations = SerializeSend2Destinations(newModel.Destinations);
-            return View("Send2", newModel);
-        }
-    }
-
-    private async Task MarkPayoutPaid(string payoutId, uint256? txId, CancellationToken token)
+    private async Task MarkPayoutFromSpendResult(string payoutId, string? spendResult, CancellationToken token)
     {
         try
         {
             using var disposable = await arkPayoutHandler.PayoutLocker.LockOrNullAsync(payoutId, 0, token);
             if (disposable is null) return;
 
-            var proof = new ArkPayoutProof
-            {
-                TransactionId = txId ?? uint256.Zero,
-                DetectedInBackground = false
-            };
+            var proof = ArkPayoutProof.FromSpendResult(spendResult);
             await pullPaymentHostedService.MarkPaid(new MarkPayoutRequest
             {
                 PayoutId = payoutId,
-                Proof = arkPayoutHandler.SerializeProof(proof)
+                Proof = arkPayoutHandler.SerializeProof(proof),
+                State = proof.ResolvedPayoutState ?? BTCPayServer.Client.Models.PayoutState.Completed
             });
         }
         catch
         {
-            // Best-effort: if marking fails, background detection will catch it
+            // Best-effort: background detection will reconcile if marking fails.
         }
     }
 
@@ -3917,23 +3469,6 @@ public class ArkController(
         Send2DestinationType.Lnurl => DestinationType.LnurlPay,
         _ => null
     };
-
-    private async Task<Send2ViewModel> BuildSend2ViewModel(string storeId, string walletId, CancellationToken token)
-    {
-        // Get spendable offchain coins only (not recoverable, not locked by pending intents)
-        var currTime = await bitcoinTimeChainProvider.GetChainTime(token);
-        var allCoins = await arkadeSpender.GetAvailableCoins(walletId, token);
-        var lockedOutpoints = await intentStorage.GetLockedVtxoOutpoints(walletId, token);
-        var lockedSet = new HashSet<NBitcoin.OutPoint>(lockedOutpoints);
-        var spendableCoins = allCoins.Where(c => !c.IsRecoverable(currTime) && !lockedSet.Contains(c.Outpoint)).ToList();
-
-        return new Send2ViewModel
-        {
-            StoreId = storeId,
-            AvailableBalanceSats = spendableCoins.Sum(c => c.TxOut.Value.Satoshi),
-            SpendableCoinsCount = spendableCoins.Count,
-        };
-    }
 
     private async Task<(LNURLPayRequest? info, string? error)> ResolveLnurlAsync(
         string destination, CancellationToken token)
@@ -4039,93 +3574,6 @@ public class ArkController(
             IsValid = parsed.IsValid,
             Error = parsed.Error
         };
-    }
-
-    private async Task EstimateSend2Fees(Send2ViewModel model, string walletId, CancellationToken token)
-    {
-        var currentTime = await bitcoinTimeChainProvider.GetChainTime(token);
-        foreach (var dest in model.Destinations)
-        {
-            if (!dest.IsValid) continue;
-
-            try
-            {
-                if (dest.Type == Send2DestinationType.ArkAddress || dest.Type == Send2DestinationType.Bip21Ark)
-                {
-                    // Ark fee estimation
-                    var arkAddr = ArkAddress.Parse(dest.ResolvedAddress!);
-                    var outputs = new[] { new ArkTxOut(ArkTxOutType.Vtxo, Money.Satoshis(dest.AmountSats), arkAddr) };
-
-                    var coins = await arkadeSpender.GetAvailableCoins(walletId, token);
-                    var feeLockedOps = await intentStorage.GetLockedVtxoOutpoints(walletId, token);
-                    var feeLockedSet = new HashSet<NBitcoin.OutPoint>(feeLockedOps);
-                    var spendableCoins = coins.Where(c => !c.IsRecoverable(currentTime) && !feeLockedSet.Contains(c.Outpoint)).ToArray();
-
-                    if (spendableCoins.Length > 0)
-                    {
-                        var fee = await feeEstimator.EstimateFeeAsync(spendableCoins, outputs, token);
-                        dest.FeeSats = fee;
-                        dest.FeeDescription = "Arkade service fee";
-                    }
-                }
-                else if (dest.Type is Send2DestinationType.LightningInvoice or Send2DestinationType.Bip21Lightning or Send2DestinationType.Lnurl)
-                {
-                    // Lightning swap fee estimation via Boltz
-                    if (boltzLimitsValidator != null)
-                    {
-                        var limits = await boltzLimitsValidator.GetAllLimitsAsync(token);
-                        if (limits != null)
-                        {
-                            var percentFee = (long)(dest.AmountSats * limits.SubmarineFeePercentage / 100m);
-                            var minerFee = limits.SubmarineMinerFee;
-                            dest.FeeSats = percentFee + minerFee;
-                            dest.FeeDescription = $"Swap fee ({limits.SubmarineFeePercentage:0.##}% + {minerFee:#,0} sat miner)";
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                dest.FeeDescription = "Fee estimation unavailable";
-            }
-        }
-    }
-
-    private static string SerializeSend2Destinations(List<Send2DestinationViewModel> destinations)
-    {
-        // Simple serialization: rawDest|type|resolvedAddr|amountSats|feeSats|isValid|error|payoutId|lnurlMin|lnurlMax;;...
-        var parts = destinations.Select(d =>
-            $"{d.RawDestination}|{(int)d.Type}|{d.ResolvedAddress ?? ""}|{d.AmountSats}|{d.FeeSats}|{d.IsValid}|{d.Error ?? ""}|{d.PayoutId ?? ""}|{d.LnurlMinSats}|{d.LnurlMaxSats}");
-        return string.Join(";;", parts);
-    }
-
-    private static void RestoreSend2Destinations(Send2ViewModel model, string? serialized)
-    {
-        if (string.IsNullOrEmpty(serialized)) return;
-
-        var parts = serialized.Split(";;", StringSplitOptions.RemoveEmptyEntries);
-        int index = 0;
-        foreach (var part in parts)
-        {
-            var segments = part.Split('|');
-            if (segments.Length >= 6)
-            {
-                model.Destinations.Add(new Send2DestinationViewModel
-                {
-                    Index = index++,
-                    RawDestination = segments[0],
-                    Type = Enum.TryParse<Send2DestinationType>(segments[1], out var t) ? t : Send2DestinationType.Unknown,
-                    ResolvedAddress = string.IsNullOrEmpty(segments[2]) ? null : segments[2],
-                    AmountSats = long.TryParse(segments[3], out var amt) ? amt : 0,
-                    FeeSats = long.TryParse(segments[4], out var fee) ? fee : 0,
-                    IsValid = bool.TryParse(segments[5], out var valid) && valid,
-                    Error = segments.Length > 6 && !string.IsNullOrEmpty(segments[6]) ? segments[6] : null,
-                    PayoutId = segments.Length > 7 && !string.IsNullOrEmpty(segments[7]) ? segments[7] : null,
-                    LnurlMinSats = segments.Length > 8 && long.TryParse(segments[8], out var lnMin) ? lnMin : 0,
-                    LnurlMaxSats = segments.Length > 9 && long.TryParse(segments[9], out var lnMax) ? lnMax : 0,
-                });
-            }
-        }
     }
 
     /// <summary>

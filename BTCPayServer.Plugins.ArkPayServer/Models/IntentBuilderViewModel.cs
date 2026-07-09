@@ -1,103 +1,4 @@
-using NBitcoin;
-
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
-
-/// <summary>
-/// View model for the intent/transaction builder page.
-/// </summary>
-public class IntentBuilderViewModel
-{
-    /// <summary>
-    /// Store ID for form submission.
-    /// </summary>
-    public string StoreId { get; set; } = "";
-
-    /// <summary>
-    /// Whether this is building an intent (offchain) or transaction.
-    /// </summary>
-    public bool IsIntent { get; set; } = true;
-
-    /// <summary>
-    /// Selected VTXOs to spend from.
-    /// </summary>
-    public List<SelectedVtxoViewModel> SelectedVtxos { get; set; } = [];
-
-    /// <summary>
-    /// Total amount available from selected VTXOs (in satoshis).
-    /// </summary>
-    public long TotalSelectedAmount { get; set; }
-
-    /// <summary>
-    /// Outputs/destinations for the spend.
-    /// </summary>
-    public List<SpendOutputViewModel> Outputs { get; set; } = [new()];
-
-    /// <summary>
-    /// Balance information for the wallet.
-    /// </summary>
-    public ArkBalancesViewModel Balances { get; set; } = new();
-
-    /// <summary>
-    /// Comma-separated outpoint strings for form persistence.
-    /// </summary>
-    public string VtxoOutpointsRaw { get; set; } = "";
-
-    /// <summary>
-    /// Whether Lightning is available for single-output payments.
-    /// </summary>
-    public bool LightningAvailable { get; set; }
-
-    /// <summary>
-    /// Validation errors.
-    /// </summary>
-    public List<string> Errors { get; set; } = [];
-}
-
-/// <summary>
-/// Represents a selected VTXO for spending.
-/// </summary>
-public class SelectedVtxoViewModel
-{
-    /// <summary>
-    /// The outpoint string (txid:vout).
-    /// </summary>
-    public string Outpoint { get; set; } = "";
-
-    /// <summary>
-    /// Transaction ID.
-    /// </summary>
-    public string TransactionId { get; set; } = "";
-
-    /// <summary>
-    /// Output index.
-    /// </summary>
-    public uint OutputIndex { get; set; }
-
-    /// <summary>
-    /// Amount in satoshis.
-    /// </summary>
-    public long Amount { get; set; }
-
-    /// <summary>
-    /// Amount formatted in BTC.
-    /// </summary>
-    public decimal AmountBtc => Money.Satoshis(Amount).ToDecimal(MoneyUnit.BTC);
-
-    /// <summary>
-    /// When the VTXO expires.
-    /// </summary>
-    public DateTimeOffset? ExpiresAt { get; set; }
-
-    /// <summary>
-    /// Whether this VTXO is recoverable (swept).
-    /// </summary>
-    public bool IsRecoverable { get; set; }
-
-    /// <summary>
-    /// Whether this VTXO can be spent offchain.
-    /// </summary>
-    public bool CanSpendOffchain { get; set; }
-}
 
 /// <summary>
 /// Represents an output destination for spending.
@@ -220,12 +121,17 @@ public class FeeEstimateResponse
     public bool IsLightning { get; set; }
 
     /// <summary>
-    /// Fee percentage for Lightning swaps.
+    /// Whether this is an Arkade→BTC chain swap (Arkade-mode Bitcoin destination).
+    /// </summary>
+    public bool IsChainSwap { get; set; }
+
+    /// <summary>
+    /// Fee percentage for Lightning/chain swaps.
     /// </summary>
     public decimal FeePercentage { get; set; }
 
     /// <summary>
-    /// Miner fee for Lightning swaps.
+    /// Miner fee for Lightning/chain swaps.
     /// </summary>
     public long MinerFeeSats { get; set; }
 
