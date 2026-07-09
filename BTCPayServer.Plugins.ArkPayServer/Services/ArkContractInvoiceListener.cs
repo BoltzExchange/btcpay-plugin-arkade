@@ -107,7 +107,7 @@ public class ArkContractInvoiceListener(
                 Script = vtxo.Script,
                 SeenAt = vtxo.CreatedAt
             };
-            await HandlePaymentData(vtxoEntity, inv, arkadePaymentMethodHandler, paymentDestination);
+            await HandlePaymentData(vtxoEntity, inv, arkadePaymentMethodHandler);
         }
         catch (Exception ex)
         {
@@ -125,10 +125,10 @@ public class ArkContractInvoiceListener(
         return Task.CompletedTask;
     }
     
-    private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler, string? destination = null)
+    private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler)
     {
         var pmi = ArkadePlugin.ArkadePaymentMethodId;
-        var details = new ArkadePaymentData($"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}", destination);
+        var details = new ArkadePaymentData($"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}");
         const PaymentStatus status = PaymentStatus.Settled;
 
         // Serialize payment registration to prevent duplicate inserts from concurrent VTXO events
@@ -148,22 +148,6 @@ public class ArkContractInvoiceListener(
                 Id = details.Outpoint,
                 Currency = "BTC",
             }.Set(freshInvoice, handler, details);
-
-            // Override destination when the payment arrived at a different
-            // address than the prompt's default (e.g. legacy rows). The PaymentBlob
-            // is serialised through BTCPay's default camelCase resolver, so the
-            // on-disk JSON property is lowercase `destination` even though the C# field
-            // is `Destination`. JObject's indexer is case-sensitive — writing `blob["Destination"]`
-            // adds a sibling field instead of replacing the lowercase one, and the deserialiser
-            // then ignores our shadow value. Update the lowercase key (and remove any stale
-            // capital-D shadow left by earlier versions of this code).
-            if (destination is not null)
-            {
-                var blob = JObject.Parse(paymentData.Blob2);
-                blob["destination"] = destination;
-                blob.Remove("Destination");
-                paymentData.Blob2 = blob.ToString(Newtonsoft.Json.Formatting.None);
-            }
 
             var alreadyExistingPaymentThatMatches = freshInvoice
                 .GetPayments(false)

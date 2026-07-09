@@ -24,7 +24,7 @@
 
 		return new ArkPaymentDataViewModel
 		{
-			Address = paymentData.Destination ?? payment.Destination,
+			Address = payment.Destination,
 			Amount = payment.Value.ToString(CultureInfo.InvariantCulture),
 			Outpoint = paymentData.Outpoint,
 			ReceivedTime = payment.ReceivedTime,
