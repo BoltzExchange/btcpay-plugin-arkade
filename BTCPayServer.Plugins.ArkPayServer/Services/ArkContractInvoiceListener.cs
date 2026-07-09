@@ -89,43 +89,14 @@ public class ArkContractInvoiceListener(
             var network = terms.Network;
             var script = Script.FromHex(vtxo.Script);
 
-            // Try to find the invoice by address — handle both Ark and boarding contracts
-            InvoiceEntity? inv = null;
-            string? paymentDestination = null;
-
-            // Check if this is a boarding contract (P2TR on-chain address)
-            var contracts = await contractStorage.GetContracts(
-                scripts: [vtxo.Script],
-                contractTypes: [NArk.Core.Contracts.ArkBoardingContract.ContractType],
-                cancellationToken: CancellationToken.None);
-
-            var isBoarding = contracts.Count > 0;
-            if (isBoarding)
-            {
-                // Boarding VTXO: look up invoice by P2TR Bitcoin address
-                var btcAddress = script.GetDestinationAddress(network);
-                if (btcAddress is not null)
-                {
-                    paymentDestination = btcAddress.ToString();
-                    inv = await invoiceRepository.GetInvoiceFromAddress(
-                        ArkadePlugin.ArkadePaymentMethodId, paymentDestination);
-                }
-            }
-            else
-            {
-                // Standard Ark VTXO: look up invoice by Ark address
-                var serverKey = terms.SignerKey.Extract().XOnlyPubKey;
-                var address = ArkAddress.FromScriptPubKey(script, serverKey);
-                paymentDestination = address.ToString(network.ChainName == ChainName.Mainnet);
-                inv = await invoiceRepository.GetInvoiceFromAddress(
-                    ArkadePlugin.ArkadePaymentMethodId, paymentDestination);
-            }
+            var serverKey = terms.SignerKey.Extract().XOnlyPubKey;
+            var address = ArkAddress.FromScriptPubKey(script, serverKey);
+            var paymentDestination = address.ToString(network.ChainName == ChainName.Mainnet);
+            var inv = await invoiceRepository.GetInvoiceFromAddress(
+                ArkadePlugin.ArkadePaymentMethodId, paymentDestination);
 
             if (inv is null)
                 return;
-
-            // Boarding payments: Processing until confirmed, then Settled
-            var isConfirmed = !isBoarding || vtxo.Metadata?.GetValueOrDefault("Confirmed") == "True";
 
             // Map NNark's ArkVtxo to plugin's VtxoEntity entity
             var vtxoEntity = new VtxoEntity
@@ -136,7 +107,7 @@ public class ArkContractInvoiceListener(
                 Script = vtxo.Script,
                 SeenAt = vtxo.CreatedAt
             };
-            await HandlePaymentData(vtxoEntity, inv, arkadePaymentMethodHandler, paymentDestination, isConfirmed, isBoarding);
+            await HandlePaymentData(vtxoEntity, inv, arkadePaymentMethodHandler, paymentDestination);
         }
         catch (Exception ex)
         {
@@ -154,11 +125,11 @@ public class ArkContractInvoiceListener(
         return Task.CompletedTask;
     }
     
-    private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler, string? destination = null, bool isConfirmed = true, bool isBoarding = false)
+    private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler, string? destination = null)
     {
         var pmi = ArkadePlugin.ArkadePaymentMethodId;
-        var details = new ArkadePaymentData($"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}", destination, isBoarding);
-        var status = isConfirmed ? PaymentStatus.Settled : PaymentStatus.Processing;
+        var details = new ArkadePaymentData($"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}", destination);
+        const PaymentStatus status = PaymentStatus.Settled;
 
         // Serialize payment registration to prevent duplicate inserts from concurrent VTXO events
         await _paymentLock.WaitAsync();
@@ -178,10 +149,10 @@ public class ArkContractInvoiceListener(
                 Currency = "BTC",
             }.Set(freshInvoice, handler, details);
 
-            // Override destination if payment came via boarding address (not the Ark contract address)
-            //
-            // The PaymentBlob is serialised through BTCPay's default camelCase resolver, so
-            // the on-disk JSON property is lowercase `destination` even though the C# field
+            // Override destination when the payment arrived at a different
+            // address than the prompt's default (e.g. legacy rows). The PaymentBlob
+            // is serialised through BTCPay's default camelCase resolver, so the
+            // on-disk JSON property is lowercase `destination` even though the C# field
             // is `Destination`. JObject's indexer is case-sensitive — writing `blob["Destination"]`
             // adds a sibling field instead of replacing the lowercase one, and the deserialiser
             // then ignores our shadow value. Update the lowercase key (and remove any stale
@@ -208,7 +179,7 @@ public class ArkContractInvoiceListener(
             }
             else
             {
-                // Update existing payment — upgrade Processing→Settled on confirmation
+                // Update existing payment if details changed
                 alreadyExistingPaymentThatMatches.Status = status;
                 alreadyExistingPaymentThatMatches.Details = JToken.FromObject(details, handler.Serializer);
                 await paymentService.UpdatePayments([alreadyExistingPaymentThatMatches]);
@@ -242,12 +213,8 @@ public class ArkContractInvoiceListener(
             return;
         }
 
-        // ConfigurePrompt tags BOTH the Payment contract (the offchain Arkade
-        // address) and, when boarding is enabled, the Boarding contract with
-        // Source = "invoice:{id}". The previous implementation only toggled
-        // the Payment one (derived from the prompt's details), so the
-        // boarding contract stayed Active forever after settlement. Find every
-        // contract carrying this invoice's source tag and toggle them all.
+        // ConfigurePrompt tags the Payment contract with Source = "invoice:{id}".
+        // Find every contract carrying this invoice's source tag and toggle them all.
         // HTLC contracts use a different "swap:{id}" Source tag and are
         // driven by OnSwapChanged based on swap state, not invoice state.
         var walletId = listenedContract.Details.WalletId;

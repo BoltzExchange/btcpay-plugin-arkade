@@ -12,7 +12,7 @@ public class ArkAddressData
 
     /// <summary>
     /// Boarding address (P2TR onchain) for depositing BTC into Ark.
-    /// Only available for HD wallets with boarding enabled.
+    /// Only returned after a boarding address has been generated for wallets that support boarding.
     /// </summary>
     public string? BoardingAddress { get; set; }
 }

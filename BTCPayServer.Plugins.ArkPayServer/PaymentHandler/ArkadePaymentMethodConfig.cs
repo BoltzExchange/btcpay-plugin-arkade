@@ -7,14 +7,8 @@ public record ArkadePaymentMethodConfig(
     bool GeneratedByStore = false,
     bool? WalletBackedUp = null,
     bool AllowSubDustAmounts = false,
-    bool BoardingEnabled = true,
-    long MinBoardingAmountSats = ArkadePaymentMethodConfig.DefaultMinBoardingAmountSats,
     List<StoreSettlementOptionConfig>? SettlementOptions = null)
 {
-    public const long P2trDustLimitSats = 330L;
-
-    public const long DefaultMinBoardingAmountSats = 5000L;
-
     public StoreSettlementOptionConfig? GetSettlementOption(StoreSettlementOption option) =>
         SettlementOptions?.FirstOrDefault(o => o.Type == StoreSettlementOptionKeys.GetKey(option));
 

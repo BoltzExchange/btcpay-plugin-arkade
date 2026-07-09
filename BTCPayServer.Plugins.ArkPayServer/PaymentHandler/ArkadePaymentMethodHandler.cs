@@ -1,9 +1,8 @@
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
-using NArk.Core;
 using NArk.Abstractions.Wallets;
-using NArk.Core.Contracts;
+using NArk.Core;
 using NArk.Core.Services;
 using NArk.Core.Transport;
 using NBitcoin;
@@ -15,9 +14,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 public class ArkadePaymentMethodHandler(
     BTCPayServerEnvironment btcPayServerEnvironment,
     IContractService contractService,
-    IClientTransport clientTransport,
-    BoardingUtxoSyncService boardingUtxoSyncService,
-    IWalletStorage walletStorage
+    IClientTransport clientTransport
 ) : IPaymentMethodHandler
 {
     public PaymentMethodId PaymentMethodId => ArkadePlugin.ArkadePaymentMethodId;
@@ -60,48 +57,6 @@ public class ArkadePaymentMethodHandler(
 
         context.TrackedDestinations.Add(context.Prompt.Destination);
         context.TrackedDestinations.Add(address.ScriptPubKey.PaymentScript.ToHex());
-
-        // Derive boarding address when: boarding enabled, no onchain BTC configured, amount above threshold.
-        // Reuse the same signing descriptor from the Ark payment contract to avoid consuming an extra HD index.
-        var hasOnchain = context.InvoiceEntity.GetPaymentPrompt(PaymentTypes.CHAIN.GetPaymentMethodId("BTC")) is not null;
-        var wallet = await walletStorage.GetWalletById(arkadePaymentMethodConfig.WalletId);
-        var amountSats = Money.Coins(context.Prompt.Calculate().Due).Satoshi;
-        if (arkadePaymentMethodConfig.BoardingEnabled &&
-            !hasOnchain && wallet?.WalletType == WalletType.HD &&
-            amountSats >= arkadePaymentMethodConfig.MinBoardingAmountSats)
-        {
-                // Construct boarding contract from same user descriptor — no extra DeriveContract call
-                var userDescriptor = contract switch
-                {
-                    ArkPaymentContract pc => pc.User,
-                    ArkDelegateContract dc => dc.User,
-                    _ => throw new PaymentMethodUnavailableException("Unsupported contract type for boarding")
-                };
-                var boardingContract = new ArkBoardingContract(
-                    serverInfo.SignerKey, serverInfo.BoardingExit, userDescriptor);
-                await contractService.ImportContract(
-                    arkadePaymentMethodConfig.WalletId,
-                    boardingContract,
-                    metadata: new Dictionary<string, string> { ["Source"] = $"invoice:{context.InvoiceEntity.Id}" },
-                    cancellationToken: CancellationToken.None);
-
-                var network = btcPayServerEnvironment.NetworkType == ChainName.Mainnet
-                    ? Network.Main
-                    : btcPayServerEnvironment.NetworkType == ChainName.Testnet
-                        ? Network.TestNet
-                        : Network.RegTest;
-                var boardingAddress = boardingContract.GetOnchainAddress(network);
-                details = details with
-                {
-                    BoardingAddress = boardingAddress.ToString(),
-                    BoardingContractString = boardingContract.ToString(),
-                };
-                context.TrackedDestinations.Add(boardingAddress.ToString());
-                context.TrackedDestinations.Add(boardingContract.GetScriptPubKey().ToHex());
-
-                // Trigger sync so NBXplorer starts tracking this boarding address immediately
-                _ = Task.Run(() => boardingUtxoSyncService.SyncAsync(CancellationToken.None));
-        }
 
         context.Prompt.Details = JObject.FromObject(details, Serializer);
     }

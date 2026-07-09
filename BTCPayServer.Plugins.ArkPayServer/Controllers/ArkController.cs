@@ -492,8 +492,6 @@ public class ArkController(
             WalletId = config.WalletId,
             SignerAvailable = signerAvailable,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
-            BoardingEnabled = config.BoardingEnabled,
-            MinBoardingAmountSats = config.MinBoardingAmountSats,
             WalletBackedUp = config.WalletBackedUp ?? true,
             HasCurrentWalletFunds = totalVtxoCount > 0,
             Wallet = wallet?.Secret,
@@ -567,12 +565,8 @@ public class ArkController(
             WalletType = wallet?.WalletType ?? WalletType.HD,
             CanManagePrivateKeys = canManagePrivateKeys,
             IsLightningEnabled = IsArkadeLightningEnabled(),
-            Form = new StoreSettingsFormModel
-            {
-                MinBoardingAmountSats = config.MinBoardingAmountSats
-            },
+            Form = new StoreSettingsFormModel(),
             AllowSubDustAmounts = config.AllowSubDustAmounts,
-            BoardingEnabled = config.BoardingEnabled,
             SettlementOptions = await CreateSettlementOptions(store!, config, cancellationToken: cancellationToken),
             BoltzUrl = arkNetworkConfig.BoltzUri,
             BoltzConnected = boltzConnected,
@@ -2132,28 +2126,6 @@ public class ArkController(
             return RedirectWithSuccess(nameof(Settings),
                 newConfig.AllowSubDustAmounts ? "Sub-dust amounts enabled for Arkade payments." : "Sub-dust amounts disabled for Arkade payments.",
                 new { storeId });
-        }
-
-        if (command == "save-boarding")
-        {
-            var minAmount = model.MinBoardingAmountSats > 0
-                ? model.MinBoardingAmountSats
-                : ArkadePaymentMethodConfig.DefaultMinBoardingAmountSats;
-            if (minAmount < ArkadePaymentMethodConfig.P2trDustLimitSats)
-                return RedirectWithError(nameof(Settings), $"Boarding minimum cannot be below the P2TR dust threshold ({ArkadePaymentMethodConfig.P2trDustLimitSats} sats).", new { storeId });
-
-            var newConfig = arkConfig with { BoardingEnabled = true, MinBoardingAmountSats = minAmount };
-            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
-            await storeRepository.UpdateStore(storeData);
-            return RedirectWithSuccess(nameof(Settings), $"Boarding enabled with minimum {minAmount} sats.", new { storeId });
-        }
-
-        if (command == "disable-boarding")
-        {
-            var newConfig = arkConfig with { BoardingEnabled = false };
-            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
-            await storeRepository.UpdateStore(storeData);
-            return RedirectWithSuccess(nameof(Settings), "Boarding disabled.", new { storeId });
         }
 
         if (!string.IsNullOrEmpty(command) &&

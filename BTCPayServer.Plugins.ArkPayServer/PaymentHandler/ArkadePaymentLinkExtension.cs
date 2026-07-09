@@ -35,12 +35,11 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
             .WithArkAddress(prompt.Destination)
             .WithAmount(amount);
 
-        // Add onchain address if available, otherwise use boarding address.
-        // When an onchain payment method is present, also delegate to its own
-        // IPaymentLinkExtension so any params other plugins attached to the
-        // upstream BIP21 (PayJoin's `pj=`, Branta's `branta_*`, etc.) carry
-        // through to the unified Arkade QR. Without this the Arkade tab
-        // clobbers those params (issue: Branta + PayJoin lose their hooks).
+        // Add the store's BTC on-chain address when that payment method is enabled.
+        // Also delegate to its IPaymentLinkExtension so params other plugins
+        // attached to the upstream BIP21 (PayJoin's `pj=`, Branta's `branta_*`,
+        // etc.) carry through to the unified Arkade QR. Without this the Arkade
+        // tab clobbers those params (issue: Branta + PayJoin lose their hooks).
         if (!string.IsNullOrEmpty(onchain?.Destination))
         {
             builder.WithOnchainAddress(onchain.Destination);
@@ -53,15 +52,6 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
                 var qIdx = upstream?.IndexOf('?') ?? -1;
                 if (qIdx >= 0)
                     builder.WithExtraQuery(upstream![(qIdx + 1)..]);
-            }
-        }
-        else if (prompt.Details is not null)
-        {
-            var handler = _serviceProvider.GetRequiredService<ArkadePaymentMethodHandler>();
-            var details = handler.ParsePaymentPromptDetails(prompt.Details);
-            if (!string.IsNullOrEmpty(details.BoardingAddress))
-            {
-                builder.WithOnchainAddress(details.BoardingAddress);
             }
         }
         

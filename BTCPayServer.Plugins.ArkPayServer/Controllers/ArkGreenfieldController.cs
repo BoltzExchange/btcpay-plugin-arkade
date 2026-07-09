@@ -92,8 +92,6 @@ public class ArkGreenfieldController(
             SignerAvailable = signerAvailable,
             IsOwnedByStore = config.GeneratedByStore,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
-            BoardingEnabled = config.BoardingEnabled,
-            MinBoardingAmountSats = config.MinBoardingAmountSats,
             LightningEnabled = IsArkadeLightningEnabled()
         });
     }
@@ -186,20 +184,6 @@ public class ArkGreenfieldController(
         if (request.AllowSubDustAmounts is { } allowSubDust)
         {
             newConfig = newConfig with { AllowSubDustAmounts = allowSubDust };
-        }
-
-        // Handle boarding settings
-        if (request.BoardingEnabled is { } boardingEnabled)
-        {
-            newConfig = newConfig with { BoardingEnabled = boardingEnabled };
-        }
-
-        if (request.MinBoardingAmountSats is { } minAmount)
-        {
-            if (minAmount < 330)
-                return this.CreateAPIError("invalid-settings",
-                    "Boarding minimum cannot be below the P2TR dust threshold (330 sats).");
-            newConfig = newConfig with { MinBoardingAmountSats = minAmount };
         }
 
         store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
