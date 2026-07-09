@@ -13,7 +13,6 @@ public class StoreOverviewViewModelTests
         var model = new StoreOverviewViewModel
         {
             WalletType = WalletType.HD,
-            CanManagePrivateKeys = true,
             SignerAvailable = true,
             WalletBackedUp = false,
             Wallet = "seed"
@@ -34,7 +33,6 @@ public class StoreOverviewViewModelTests
         var model = new StoreOverviewViewModel
         {
             WalletType = WalletType.HD,
-            CanManagePrivateKeys = true,
             SignerAvailable = true,
             WalletBackedUp = false,
             Wallet = "seed",

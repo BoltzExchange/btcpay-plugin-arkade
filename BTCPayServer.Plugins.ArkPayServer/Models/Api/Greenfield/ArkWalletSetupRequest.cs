@@ -6,10 +6,9 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
 public class ArkWalletSetupRequest
 {
     /// <summary>
-    /// Wallet seed phrase or identifier. Supports:
+    /// Wallet seed phrase. Supports:
     /// - null/empty: generates a new 12-word BIP-39 mnemonic
     /// - 12 or 24 word BIP-39 mnemonic: imports as HD wallet
-    /// - Existing wallet ID: links the wallet to this store (no new wallet created)
     /// </summary>
     public string? Wallet { get; set; }
 

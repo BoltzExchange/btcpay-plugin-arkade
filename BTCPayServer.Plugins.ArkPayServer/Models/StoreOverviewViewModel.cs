@@ -18,14 +18,12 @@ public class StoreOverviewViewModel
     public bool HasCurrentWalletFunds { get; set; }
 
     public WalletType WalletType { get; set; }
-    public bool CanManagePrivateKeys { get; set; }
 
     /// <summary>Status of the most recent background wallet-recovery run (import or Rescan), if any.</summary>
     public RecoveryStatus? RecoveryStatus { get; set; }
 
     public bool ShouldWarnWalletBackup =>
         WalletType == WalletType.HD &&
-        CanManagePrivateKeys &&
         SignerAvailable &&
         !WalletBackedUp &&
         HasCurrentWalletFunds &&

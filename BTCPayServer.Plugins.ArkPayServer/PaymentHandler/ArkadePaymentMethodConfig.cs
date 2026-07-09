@@ -4,7 +4,6 @@ namespace BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 
 public record ArkadePaymentMethodConfig(
     string WalletId,
-    bool GeneratedByStore = false,
     bool? WalletBackedUp = null,
     bool AllowSubDustAmounts = false,
     List<StoreSettlementOptionConfig>? SettlementOptions = null)

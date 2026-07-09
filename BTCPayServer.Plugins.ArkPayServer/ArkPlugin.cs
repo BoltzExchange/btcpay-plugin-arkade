@@ -265,6 +265,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             new WalletScopedLoggerProvider(sp.GetRequiredService<IWalletLogStore>()));
 
         services.AddSingleton<ArkadeSpendingService>();
+        services.AddSingleton<ArkWalletOwnershipService>();
 
         // Remote-signer transport registration.
         //
