@@ -10,7 +10,5 @@ public class ArkWalletData
     public bool SignerAvailable { get; set; }
     public bool IsOwnedByStore { get; set; }
     public bool AllowSubDustAmounts { get; set; }
-    public bool BoardingEnabled { get; set; }
-    public long MinBoardingAmountSats { get; set; }
     public bool LightningEnabled { get; set; }
 }

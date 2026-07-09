@@ -5,8 +5,6 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
 public class StoreSettingsFormModel
 {
-    public long MinBoardingAmountSats { get; set; }
-
     [BindNever]
     public Dictionary<StoreSettlementOption, SettlementInput> SettlementInputs { get; set; } = [];
 }

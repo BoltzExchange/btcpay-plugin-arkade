@@ -20,8 +20,6 @@
         (Model.Balances?.UnspendableBalance ?? 0) +
         (Model.Balances?.BoardingBalance ?? 0);
 
-    string FormatSats(long? sats) => sats.HasValue ? $"{sats.Value:N0} sats" : "Unavailable";
-
     string? Unit(StoreOverviewStatUnit unit) =>
         unit == StoreOverviewStatUnit.Sats ? "sats" : null;
 
@@ -327,20 +325,6 @@
                             </span>
                         </dd>
 
-                        @if (Model.WalletType == WalletType.HD)
-                        {
-                            <dt class="col-5 text-muted fw-normal">On-chain fallback</dt>
-                            <dd class="col-7 text-end">
-                                <span class="badge @(Model.BoardingEnabled ? "text-bg-info" : "text-bg-secondary")">
-                                    @(Model.BoardingEnabled ? "Enabled" : "Disabled")
-                                </span>
-                            </dd>
-                            @if (Model.BoardingEnabled)
-                            {
-                                <dt class="col-5 text-muted fw-normal">On-chain minimum</dt>
-                                <dd class="col-7 text-end">@FormatSats(Model.MinBoardingAmountSats)</dd>
-                            }
-                        }
                     </dl>
                     @if (Model.RecoveryStatus is { } rec)
                     {

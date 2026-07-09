@@ -168,28 +168,6 @@
         </form>
     </div>
 
-    @if (Model.WalletType == WalletType.HD)
-    {
-        <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId" class="py-3 border-bottom">
-            <label for="MinBoardingAmountSats" class="form-label fw-semibold">On-chain fallback</label>
-            <div class="row g-2">
-                <div class="col-md">
-                    <input id="MinBoardingAmountSats" name="MinBoardingAmountSats" value="@Model.Form.MinBoardingAmountSats" class="form-control" type="number" min="@ArkadePaymentMethodConfig.P2trDustLimitSats" />
-                    <div class="form-text">Show on-chain fallback addresses for invoices at or above this amount.</div>
-                </div>
-                <div class="col-md-auto d-flex gap-2 align-items-start">
-                    @if (Model.BoardingEnabled)
-                    {
-                        <button type="submit" name="command" value="disable-boarding" class="btn btn-outline-secondary">Disable</button>
-                    }
-                    <button type="submit" name="command" value="save-boarding" class="btn btn-primary">
-                        @(Model.BoardingEnabled ? "Save" : "Enable")
-                    </button>
-                </div>
-            </div>
-        </form>
-    }
-
     <div class="d-flex flex-wrap gap-2 pt-3">
         <form asp-action="SyncWallet" method="post" asp-route-storeId="@storeId">
             <button type="submit" class="btn btn-outline-secondary">

@@ -24,10 +24,10 @@ Direct VTXO-to-VTXO off-chain payments within the Arkade network. Instant settle
 ### 2. Lightning via Boltz
 Payers with Lightning wallets pay a BOLT11 invoice. The plugin uses Boltz's trustless submarine swap to convert the Lightning payment into a VTXO in your Arkade wallet. No Lightning node needed on the merchant side.
 
-### 3. Boarding Address
-Payers send on-chain Bitcoin to a Taproot "boarding address." The Arkade operator batches this into the next batch, converting the on-chain UTXO into a VTXO. If the operator is unresponsive, the payer can reclaim funds unilaterally after a timelock.
+### 3. On-chain Boarding (Receive page)
+Merchants can generate a boarding address from the wallet **Receive** page to accept on-chain Bitcoin entry into Arkade. This is not shown on invoice checkout — checkout is Arkade-native + optional Lightning only unless the store also enables BTCPay's standard on-chain BTC payment method.
 
-The checkout page presents all applicable methods in a single BIP-21 QR code, letting any wallet pay automatically.
+The checkout page presents applicable methods in a single BIP-21 QR code when multiple rails are active.
 
 ---
 
@@ -112,8 +112,6 @@ The setup script will:
 
 | Setting | Default | Description |
 |---|---|---|
-| Boarding Address | Enabled | Show boarding address on invoices (on-chain entry to Arkade) |
-| Boarding Minimum | 5000 sats | Minimum amount to display boarding address (floor: 330 sats / P2TR dust) |
 | Sub-dust Payments | Disabled | Accept payments below 330 sats (no dust limit for VTXOs) |
 | Auto-sweep Address | — | Forward all received funds to this on-chain address automatically |
 
@@ -154,7 +152,6 @@ The setup script will:
 - Unified BIP-21 QR code covers Arkade native + Lightning in one scan
 - NFC-compatible checkout component
 - Real-time payment status updates via VTXO subscription
-- Boarding payments show as "Processing" until 1 on-chain confirmation, then "Settled"
 - Sub-dust toggle for micro-payments
 
 ### Wallet Management
@@ -290,7 +287,7 @@ The plugin exposes a store-scoped REST API under `/api/v1/stores/{storeId}/arkad
 
 - `GET /api/v1/stores/{storeId}/arkade/wallet` — current Arkade wallet config.
 - `POST /api/v1/stores/{storeId}/arkade/wallet` — create or import a wallet.
-- `PATCH /api/v1/stores/{storeId}/arkade/wallet/settings` — update destination, sub-dust, boarding.
+- `PATCH /api/v1/stores/{storeId}/arkade/wallet/settings` — update sub-dust toggle.
 - `DELETE /api/v1/stores/{storeId}/arkade/wallet` — unlink wallet from the store.
 - `GET /api/v1/stores/{storeId}/arkade/balance` — available / locked / recoverable / boarding sats.
 - `GET|POST /api/v1/stores/{storeId}/arkade/address` — read or mint a receive / boarding address.

@@ -14,8 +14,6 @@ public class StoreOverviewViewModel
     public bool SignerAvailable { get; set; }
     public string? Wallet { get; set; }
     public bool AllowSubDustAmounts { get; set; }
-    public bool BoardingEnabled { get; set; }
-    public long MinBoardingAmountSats { get; set; }
     public bool WalletBackedUp { get; set; }
     public bool HasCurrentWalletFunds { get; set; }
 

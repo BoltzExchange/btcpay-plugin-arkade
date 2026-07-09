@@ -92,14 +92,6 @@ public class ArkadeCheckoutModelExtension: ICheckoutModelExtension, IGlobalCheck
         // Other plugin-contributed params are forwarded verbatim — uppercasing would mangle
         // case-sensitive payloads (PayJoin's onion URLs, Branta's base64 secrets, etc.).
         context.Model.InvoiceBitcoinUrlQR = AppendQuery(UpperCaseQrUri(paymentLink), extraForQr);
-
-        // Pass boarding flag to checkout component
-        if (context.Prompt.Details is not null)
-        {
-            var details = _handler.ParsePaymentPromptDetails(context.Prompt.Details);
-            if (!string.IsNullOrEmpty(details.BoardingAddress))
-                context.Model.AdditionalData["hasBoardingAddress"] = JToken.FromObject(true);
-        }
     }
 
     /// <summary>
