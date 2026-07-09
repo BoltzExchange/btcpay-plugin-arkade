@@ -7,7 +7,7 @@ namespace NArk.E2E.Tests;
 
 /// <summary>
 /// Exercises the offchain spend path: a funded wallet selects coins via
-/// /suggest-coins and submits a transfer via /build-intent to another
+/// /suggest-coins and submits a transfer through the /send wizard to another
 /// store's Arkade address. Both wallets are funded/observed through the
 /// in-process IContractService note path (see FundedWalletTests).
 /// </summary>
@@ -23,12 +23,13 @@ public class SpendingTests : PlaywrightBaseTest
     }
 
     /// <summary>
-    /// Unhappy path: build-intent with no VTXOs selected must surface a
-    /// validation error and not move funds.
+    /// Unhappy path: the /send wizard with no coins selected (manual coin
+    /// mode, empty selection) must surface a validation error and not move
+    /// funds.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task BuildIntent_NoCoinsSelected_ShowsError()
+    public async Task Send_NoCoinsSelected_ShowsError()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -39,8 +40,9 @@ public class SpendingTests : PlaywrightBaseTest
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
+        // No selectedVtxoOutpoints and no auto CoinSelectionMode → "No coins selected".
         var resp = await Page.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/build-intent").AbsoluteUri,
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
             new APIRequestContextOptions
             {
                 Headers = new Dictionary<string, string>
@@ -50,16 +52,14 @@ public class SpendingTests : PlaywrightBaseTest
                 },
                 Data = UrlEncodeForm(new()
                 {
-                    ["StoreId"] = storeId,
-                    ["VtxoOutpointsRaw"] = "",
                     ["Outputs[0].Destination"] = recipientAddr,
                     ["Outputs[0].AmountBtc"] = "0.0001"
                 })
             });
 
-        Assert.True(resp.Ok, $"build-intent returned {resp.Status}");
+        Assert.True(resp.Ok, $"send returned {resp.Status}");
         var html = await resp.TextAsync();
-        Assert.Contains("No valid VTXOs selected", html);
+        Assert.Contains("No coins selected", html);
     }
 
     /// <summary>

@@ -9,8 +9,8 @@ using Xunit.Abstractions;
 namespace NArk.E2E.Tests;
 
 /// <summary>
-/// Boltz swap coverage. ARK→LN submarine swaps go through the spend /
-/// build-intent path (not the invoice payment-prompt path that hangs for
+/// Boltz swap coverage. ARK→LN submarine swaps go through the /send wizard
+/// path (not the invoice payment-prompt path that hangs for
 /// LN-receive), so they're tractable here. Reverse swaps (LN→ARK) are
 /// intentionally out of scope — they hang in BTCPay's invoice pipeline,
 /// a separate defect tracked elsewhere.
@@ -28,7 +28,7 @@ public class SwapsTests : PlaywrightBaseTest
 
     /// <summary>
     /// Fund an Arkade wallet, then pay an LND BOLT11 invoice from it via
-    /// /build-intent. The plugin routes a Lightning destination through a
+    /// the /send wizard. The plugin routes a Lightning destination through a
     /// Boltz submarine swap; assert a Submarine ArkSwap is recorded for
     /// the wallet.
     /// </summary>
@@ -57,8 +57,11 @@ public class SwapsTests : PlaywrightBaseTest
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
 
+        // Manual coin selection with the polled non-recoverable outpoints:
+        // Lightning sends reject recoverable (swept) coins, so pin the exact
+        // selection rather than letting auto mode pick.
         var resp = await Page!.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/build-intent").AbsoluteUri,
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
             new APIRequestContextOptions
             {
                 Headers = new Dictionary<string, string>
@@ -66,12 +69,12 @@ public class SwapsTests : PlaywrightBaseTest
                     ["RequestVerificationToken"] = token,
                     ["Content-Type"] = "application/x-www-form-urlencoded"
                 },
-                Data = $"StoreId={Uri.EscapeDataString(storeId)}" +
-                       $"&VtxoOutpointsRaw={Uri.EscapeDataString(string.Join(",", outpoints))}" +
+                Data = "CoinSelectionMode=manual" +
+                       string.Concat(outpoints.Select(o => $"&selectedVtxoOutpoints={Uri.EscapeDataString(o)}")) +
                        $"&Outputs[0].Destination={Uri.EscapeDataString(bolt11)}"
             });
 
-        Assert.True(resp.Ok, $"build-intent (LN) returned {resp.Status}");
+        Assert.True(resp.Ok, $"send (LN) returned {resp.Status}");
 
         // The submarine swap is created synchronously during the spend;
         // poll the in-process swap storage briefly for it.
