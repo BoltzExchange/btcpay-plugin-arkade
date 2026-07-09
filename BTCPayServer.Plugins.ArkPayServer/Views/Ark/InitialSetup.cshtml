@@ -35,7 +35,7 @@
     <div data-setup-choice class="@(settlementStepActive ? "d-none" : "")">
         <h3 class="my-4">I have a wallet</h3>
         <div class="list-group">
-            <a href="#" class="list-group-item list-group-item-action" data-bs-toggle="collapse" data-bs-target="#importExisting" data-testid="legacy-wallet-option">
+            <a href="#" class="list-group-item list-group-item-action" data-bs-toggle="collapse" data-bs-target="#importExisting" data-testid="import-wallet-option">
                 <div class="image">
                     <vc:icon symbol="wallet-existing"/>
                 </div>
@@ -56,7 +56,7 @@
                     <div data-wallet-step class="@(settlementValidationError && importExistingActive ? "d-none" : "")">
                         <div class="form-group mb-3">
                             <label asp-for="Wallet" class="form-label">Wallet settings</label>
-                            <input asp-for="Wallet" class="form-control" placeholder="seed phrase / wallet-id" id="existingWalletInput" required data-testid="nsec-input"/>
+                            <input asp-for="Wallet" class="form-control" placeholder="seed phrase / wallet-id" id="existingWalletInput" required data-testid="wallet-import-input"/>
                             <span asp-validation-for="Wallet" class="text-danger"></span>
                             <div class="form-text mt-2">
                                 <strong>Options:</strong>

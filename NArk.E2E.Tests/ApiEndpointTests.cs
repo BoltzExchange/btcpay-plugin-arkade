@@ -35,10 +35,8 @@ public class ApiEndpointTests : PlaywrightBaseTest
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         // Donor store with a deterministic Arkade address.
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-        var arkAddr = await Page!.InputValueAsync("[data-testid='receive-address']");
-        Assert.False(string.IsNullOrWhiteSpace(arkAddr));
+        var storeId = await CreateStoreWithArkWalletAsync();
+        var arkAddr = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, storeId);
 
         var resp = await Page.Context.APIRequest.PostAsync(
             new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,
@@ -72,7 +70,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         var bolt11 = await NArk.Tests.End2End.Common.DockerHelper.CreateLndInvoice(
             amtSats: 1_000, expirySecs: 300);
@@ -110,7 +108,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         var key = new Key();
         var btcAddr = key.GetAddress(ScriptPubKeyType.TaprootBIP86, Network.RegTest).ToString();
@@ -144,7 +142,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         var resp = await Page!.Context.APIRequest.PostAsync(
             new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,

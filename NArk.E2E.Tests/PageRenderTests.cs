@@ -36,7 +36,7 @@ public class PageRenderTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         var resp = await Page!.Context.APIRequest.GetAsync(
             new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/{subpath}").AbsoluteUri);
@@ -60,7 +60,7 @@ public class PageRenderTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         // MaxRedirects = 0 surfaces the raw 302; the default follows it
         // and the test would assert on the wrong URL.

@@ -62,7 +62,7 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithSingleKeyWalletAsync();
+        var storeId = await CreateStoreWithArkWalletAsync();
 
         // Funding the in-arkd ark CLI requires one batch round (~10s).
         // Deliberately do this BEFORE the timing window — we want to

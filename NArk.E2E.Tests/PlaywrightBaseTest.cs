@@ -12,14 +12,16 @@ using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using NArk.Abstractions.Contracts;
+using NArk.Abstractions.Wallets;
 using NArk.Core.Contracts;
 using NArk.Core.Services;
+using NArk.Core.Transport;
 using NArk.Swaps.Abstractions;
 using NArk.Swaps.Models;
 using NArk.Tests.End2End.Common;
 using NBitcoin;
-using NBitcoin.DataEncoders;
-using NBitcoin.Secp256k1;
+using Newtonsoft.Json.Linq;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -144,7 +146,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
 
         var network = networkProvider.GetNetwork<BTCPayNetwork>("BTC")!;
         var xpub = new ExtKey().Neuter().GetWif(network.NBitcoinNetwork);
-        var derivation = DerivationSchemeSettings.Parse($"{xpub}-[legacy]", network);
+        var derivation = DerivationSchemeSettings.Parse(xpub.ToString(), network);
         var wallet = walletProvider.GetWallet("BTC") ??
             throw new InvalidOperationException("BTC wallet is not available.");
         await wallet.TrackAsync(derivation.AccountDerivation);
@@ -192,9 +194,6 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return storeId;
     }
 
-    protected Task<string> CreateStoreWithSingleKeyWalletAsync() =>
-        CreateStoreWithArkWalletAsync(GenerateRandomNsec());
-
     protected async Task OpenCreateWalletSettlementStepAsync()
     {
         ArgumentNullException.ThrowIfNull(Page);
@@ -215,9 +214,9 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     {
         ArgumentNullException.ThrowIfNull(Page);
 
-        await Page.ClickAsync("[data-testid='legacy-wallet-option']");
-        await Page.WaitForSelectorAsync("#importExisting.show [data-testid='nsec-input']");
-        await Page.FillAsync("#importExisting [data-testid='nsec-input']", walletInput);
+        await Page.ClickAsync("[data-testid='import-wallet-option']");
+        await Page.WaitForSelectorAsync("#importExisting.show [data-testid='wallet-import-input']");
+        await Page.FillAsync("#importExisting [data-testid='wallet-import-input']", walletInput);
         await Page.ClickAsync("#importExisting [data-testid='import-wallet-next-btn']");
         await Page.WaitForSelectorAsync("#importExisting [data-settlement-step]:not(.d-none)");
     }
@@ -479,21 +478,49 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         throw new TimeoutException($"No ChainArkToBtc swap was recorded for wallet {walletId}.");
     }
 
-    /// <summary>Generates a valid random nsec private key for wallet imports.</summary>
-    protected static string GenerateRandomNsec()
+    /// <summary>Generates a receive address directly from the in-process test host.</summary>
+    protected static async Task<string> GetStoreReceiveAddressAsync(ServerTester serverTester, string storeId)
     {
-        Span<byte> keyBytes = stackalloc byte[32];
-        Random.Shared.NextBytes(keyBytes);
-        if (!ECPrivKey.TryCreate(keyBytes, out _))
+        var services = serverTester.PayTester.ServiceProvider;
+        var storeRepository = services.GetRequiredService<StoreRepository>();
+        var contractService = services.GetRequiredService<IContractService>();
+        var clientTransport = services.GetRequiredService<IClientTransport>();
+
+        var paymentMethodId = new PaymentMethodId("ARKADE");
+        string? walletId = null;
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            keyBytes.Clear();
-            keyBytes[31] = 0x01;
+            var store = await storeRepository.FindStore(storeId) ??
+                throw new InvalidOperationException($"Store {storeId} was not found.");
+            // The plugin is loaded in an isolated AssemblyLoadContext in E2E,
+            // so avoid typed payment config casts across that boundary.
+            var config = store.GetPaymentMethodConfig(paymentMethodId);
+            walletId = config is null ? null : ReadString(config, "walletId");
+            if (!string.IsNullOrWhiteSpace(walletId))
+                break;
+
+            await Task.Delay(250);
         }
-        var encoder = Encoders.Bech32("nsec");
-        encoder.StrictLength = false;
-        encoder.SquashBytes = true;
-        return encoder.EncodeData(keyBytes.ToArray(), Bech32EncodingType.BECH32);
+
+        if (string.IsNullOrWhiteSpace(walletId))
+            throw new InvalidOperationException($"Store {storeId} has no Arkade wallet configured.");
+
+        var terms = await clientTransport.GetServerInfoAsync();
+        var contract = await contractService.DeriveContract(
+            walletId,
+            NextContractPurpose.Receive,
+            ContractActivityState.AwaitingFundsBeforeDeactivate,
+            metadata: new Dictionary<string, string> { ["Source"] = "manual" });
+        var address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
+
+        Assert.False(string.IsNullOrWhiteSpace(address), $"Store {storeId} has no receive address");
+        return address;
     }
+
+    protected static string? ReadString(JToken token, string camelCaseName) =>
+        token.Value<string>(camelCaseName) ??
+        token.Value<string>(char.ToUpperInvariant(camelCaseName[0]) + camelCaseName[1..]);
 
     /// <summary>Reads the store's configured Arkade wallet id from overview.</summary>
     protected async Task<string?> GetStoreWalletIdAsync(string storeId)

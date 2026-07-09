@@ -13,7 +13,6 @@ public class StoreOverviewViewModel
     public string? WalletId { get; set; }
     public bool SignerAvailable { get; set; }
     public string? Wallet { get; set; }
-    public string? DefaultAddress { get; set; }
     public bool AllowSubDustAmounts { get; set; }
     public bool BoardingEnabled { get; set; }
     public long MinBoardingAmountSats { get; set; }

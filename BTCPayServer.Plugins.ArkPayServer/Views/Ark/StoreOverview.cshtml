@@ -125,19 +125,6 @@
     </div>
 </div>
 
-@if (!string.IsNullOrEmpty(Model.DefaultAddress) && Model.WalletType == WalletType.SingleKey)
-{
-    <div class="mb-4">
-        <label class="text-muted small">Receive address</label>
-        <div class="input-group">
-            <input type="text" class="form-control font-monospace" value="@Model.DefaultAddress" readonly data-testid="receive-address" />
-            <button type="button" class="btn btn-outline-secondary" data-clipboard="@Model.DefaultAddress" data-testid="copy-address-btn" title="Copy to clipboard">
-                <vc:icon symbol="actions-copy" />
-            </button>
-        </div>
-    </div>
-}
-
 @if (Model.HasPaymentServiceIssue)
 {
     <div class="alert alert-danger d-flex gap-3 align-items-start mb-4" role="alert">
@@ -316,7 +303,7 @@
                     <h3 class="h5 mb-3">Wallet details</h3>
                     <dl class="row mb-0">
                         <dt class="col-5 text-muted fw-normal">Wallet type</dt>
-                        <dd class="col-7 text-end">@(Model.WalletType == WalletType.HD ? "HD (BIP-39)" : "Legacy single-key")</dd>
+                        <dd class="col-7 text-end">HD (BIP-39)</dd>
 
                         <dt class="col-5 text-muted fw-normal">Wallet ID</dt>
                         <dd class="col-7 text-end">
