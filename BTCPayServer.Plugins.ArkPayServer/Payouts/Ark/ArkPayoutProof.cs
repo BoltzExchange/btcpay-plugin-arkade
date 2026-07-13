@@ -1,6 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
+using BTCPayServer.Plugins.ArkPayServer.Services;
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Payouts.Ark;
@@ -34,17 +35,14 @@ public class ArkPayoutProof: IPayoutProof
     [JsonIgnore]
     public string? Link { get; set; }
 
-    public static ArkPayoutProof FromSpendResult(string? spendResult)
+    public static ArkPayoutProof FromSpendResult(SpendResult? spendResult)
     {
         var proof = new ArkPayoutProof();
 
-        if (string.IsNullOrWhiteSpace(spendResult))
-            return proof;
-
-        if (uint256.TryParse(spendResult, out var txId))
+        if (spendResult?.TxId is { } txIdStr && uint256.TryParse(txIdStr, out var txId))
             proof.TransactionId = txId;
-        else
-            proof.TransferId = spendResult;
+        else if (spendResult?.SwapId is { Length: > 0 } swapId)
+            proof.TransferId = swapId;
 
         return proof;
     }

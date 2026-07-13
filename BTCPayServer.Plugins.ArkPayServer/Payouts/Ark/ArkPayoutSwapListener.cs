@@ -14,11 +14,12 @@ using PayoutData = BTCPayServer.Data.PayoutData;
 namespace BTCPayServer.Plugins.ArkPayServer.Payouts.Ark;
 
 /// <summary>
-/// Completes bitcoin-destination payouts settled through an Ark->BTC chain swap.
-/// The automated processor leaves such payouts InProgress with the swap id as
-/// proof (<see cref="ArkPayoutProof.TransferId"/>); this listener watches the
-/// swap storage and marks the payout Completed once the swap settles, or reverts
-/// it to AwaitingPayment (clearing the proof so it can be retried) when the swap
+/// Completes payouts settled through a swap: an Ark->BTC chain swap for bitcoin
+/// destinations, or a Lightning submarine swap for BOLT11 destinations. The send
+/// path leaves such payouts InProgress with the swap id as proof
+/// (<see cref="ArkPayoutProof.TransferId"/>); this listener watches the swap
+/// storage and marks the payout Completed once the swap settles, or reverts it
+/// to AwaitingPayment (clearing the proof so it can be retried) when the swap
 /// fails or is refunded.
 /// </summary>
 public class ArkPayoutSwapListener(
@@ -93,7 +94,7 @@ public class ArkPayoutSwapListener(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to reconcile in-progress chain-swap payouts");
+            logger.LogError(ex, "Failed to reconcile in-progress swap payouts");
         }
     }
 
@@ -118,7 +119,7 @@ public class ArkPayoutSwapListener(
                     Proof = payoutHandler.SerializeProof(proof)
                 });
                 logger.LogInformation(
-                    "Chain swap {SwapId} settled; marking payout {PayoutId} completed ({Result})",
+                    "Swap {SwapId} settled; marking payout {PayoutId} completed ({Result})",
                     swap.SwapId, payout.Id, completed);
                 break;
             case ArkSwapStatus.Failed or ArkSwapStatus.Refunded:
@@ -128,7 +129,7 @@ public class ArkPayoutSwapListener(
                     State = PayoutState.AwaitingPayment
                 });
                 logger.LogWarning(
-                    "Chain swap {SwapId} ended {Status}; reverting payout {PayoutId} to awaiting payment for retry ({Result})",
+                    "Swap {SwapId} ended {Status}; reverting payout {PayoutId} to awaiting payment for retry ({Result})",
                     swap.SwapId, swap.Status, payout.Id, reverted);
                 break;
         }

@@ -53,6 +53,7 @@ public class ArkGreenfieldController(
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
     IClientTransport clientTransport,
     ArkadeSpendingService arkadeSpendingService,
+    ArkadeWalletService walletService,
     ArkWalletOwnershipService walletOwnership,
     ISpendingService arkadeSpender,
     IFeeEstimator feeEstimator,
@@ -242,8 +243,15 @@ public class ArkGreenfieldController(
 
         try
         {
-            var balance = await ComputeBalances(config!.WalletId!, cancellationToken);
-            return Ok(balance);
+            var balances = await walletService.GetBalances(config!.WalletId!, cancellationToken);
+            return Ok(new ArkBalanceData
+            {
+                AvailableSats = (long)balances.AvailableBalance,
+                LockedSats = (long)balances.LockedBalance,
+                RecoverableSats = (long)balances.RecoverableBalance,
+                UnspendableSats = (long)balances.UnspendableBalance,
+                BoardingSats = (long)balances.BoardingBalance
+            });
         }
         catch (Exception ex)
         {
@@ -268,11 +276,11 @@ public class ArkGreenfieldController(
 
         var model = new ArkAddressData();
 
-        var existingAddress = await FindManualReceiveAddress(config!.WalletId!, cancellationToken);
+        var existingAddress = await walletService.FindManualReceiveAddress(config!.WalletId!, cancellationToken);
         if (existingAddress != null)
             model.Address = existingAddress;
 
-        var existingBoarding = await FindManualBoardingAddress(config.WalletId!, cancellationToken);
+        var existingBoarding = await walletService.FindManualBoardingAddress(config.WalletId!, cancellationToken);
         if (existingBoarding != null)
             model.BoardingAddress = existingBoarding;
 
@@ -304,7 +312,7 @@ public class ArkGreenfieldController(
             model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
 
             // Include existing ark address if any
-            var existing = await FindManualReceiveAddress(config.WalletId!, cancellationToken);
+            var existing = await walletService.FindManualReceiveAddress(config.WalletId!, cancellationToken);
             if (existing != null) model.Address = existing;
         }
         else
@@ -318,7 +326,7 @@ public class ArkGreenfieldController(
             model.Address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
 
             // Include existing boarding address if any
-            var existing = await FindManualBoardingAddress(config.WalletId!, cancellationToken);
+            var existing = await walletService.FindManualBoardingAddress(config.WalletId!, cancellationToken);
             if (existing != null) model.BoardingAddress = existing;
         }
 
@@ -346,14 +354,14 @@ public class ArkGreenfieldController(
         try
         {
             var store = HttpContext.GetStoreData();
-            var txId = await arkadeSpendingService.Spend(
+            var result = await arkadeSpendingService.Spend(
                 store!,
                 request.Destination,
                 request.AmountSats,
                 request.InputOutpoints,
                 cancellationToken);
 
-            return Ok(new ArkSendResponse { TxId = txId });
+            return Ok(new ArkSendResponse { TxId = result.TxId, SwapId = result.SwapId });
         }
         catch (MalformedPaymentDestination ex)
         {
@@ -413,10 +421,7 @@ public class ArkGreenfieldController(
                         return this.CreateAPIError(503, "boltz-unavailable",
                             "Boltz instance does not support Ark.");
 
-                    var amountSats = request.Outputs[0].AmountSats ?? 0L;
-                    if (amountSats <= 0)
-                        return this.CreateAPIError("missing-amount",
-                            "amountSats is required when estimating a Lightning fee.");
+                    var amountSats = request.Outputs[0].AmountSats ?? request.TotalInputSats;
 
                     response.IsLightning = true;
                     response.FeePercentage = limits.SubmarineFeePercentage * 100m;
@@ -442,7 +447,7 @@ public class ArkGreenfieldController(
                         var chainLimits = boltzLimitsValidator != null
                             ? await boltzLimitsValidator.GetChainLimitsAsync(isBtcToArk: false, cancellationToken)
                             : null;
-                        var chainAmountSats = request.Outputs[0].AmountSats ?? 0L;
+                        var chainAmountSats = request.Outputs[0].AmountSats ?? request.TotalInputSats;
                         if (chainLimits != null &&
                             chainAmountSats >= chainLimits.MinAmount &&
                             chainAmountSats <= chainLimits.MaxAmount)
@@ -502,7 +507,9 @@ public class ArkGreenfieldController(
             }
             else
             {
-                coins = await ResolveCoinsForOutpoints(config!.WalletId!, request.InputOutpoints, cancellationToken);
+                coins = ArkSpendHelpers.ResolveCoinsForOutpoints(
+                    await arkadeSpender.GetAvailableCoins(config!.WalletId!, cancellationToken),
+                    request.InputOutpoints);
             }
 
             if (coins.Count == 0)
@@ -561,7 +568,7 @@ public class ArkGreenfieldController(
             {
                 response.EstimatedFeeSats = await feeEstimator.EstimateFeeAsync(
                     coins.ToArray(), outputs.ToArray(), cancellationToken);
-                response.FeeDescription = hasOnchain ? "Batch transaction fee" : "Ark service fee";
+                response.FeeDescription = hasOnchain ? "Batch transaction fee" : "Arkade service fee";
             }
 
             return Ok(response);
@@ -595,24 +602,6 @@ public class ArkGreenfieldController(
         }
 
         return (destType, targetSats);
-    }
-
-    private async Task<List<ArkCoin>> ResolveCoinsForOutpoints(
-        string walletId, IReadOnlyList<string> outpoints, CancellationToken cancellationToken)
-    {
-        if (outpoints == null || outpoints.Count == 0)
-            return [];
-
-        var available = await arkadeSpender.GetAvailableCoins(walletId, cancellationToken);
-        var byOutpoint = available.ToDictionary(ArkSpendHelpers.FormatOutpoint);
-        var coins = new List<ArkCoin>(outpoints.Count);
-        foreach (var raw in outpoints)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) continue;
-            if (byOutpoint.TryGetValue(raw.Trim(), out var coin))
-                coins.Add(coin);
-        }
-        return coins;
     }
 
     #endregion
@@ -708,7 +697,7 @@ public class ArkGreenfieldController(
                 }
             }
 
-            result.AmountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
+            result.AmountSats = amountBtc is { } amount ? Money.Coins(amount).Satoshi : 0L;
             result.IsValid = true;
             return result;
         }
@@ -726,7 +715,7 @@ public class ArkGreenfieldController(
             ResolvedAddress = parsed.ResolvedAddress,
             Type = parsed.Type.ToString(),
             AmountSats = parsed.AmountSats,
-            AmountBtc = parsed.AmountSats / 100_000_000m,
+            AmountBtc = Money.Satoshis(parsed.AmountSats).ToDecimal(MoneyUnit.BTC),
             PayoutId = parsed.PayoutId,
             IsValid = parsed.IsValid,
             Error = parsed.Error,
@@ -1200,11 +1189,7 @@ public class ArkGreenfieldController(
 
         try
         {
-            var contracts = await contractStorage.GetContracts(
-                walletIds: [config!.WalletId!], cancellationToken: cancellationToken);
-            await vtxoSyncService.PollScriptsForVtxos(
-                contracts.Select(c => c.Script).ToHashSet(), cancellationToken);
-            await boardingUtxoSyncService.SyncAsync(cancellationToken);
+            await walletService.SyncWallet(config!.WalletId!, cancellationToken);
             return Ok(new { synced = true });
         }
         catch (Exception ex)
@@ -1243,47 +1228,6 @@ public class ArkGreenfieldController(
         var lnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
             PaymentTypes.LN.GetPaymentMethodId("BTC"), paymentMethodHandlerDictionary);
         return lnConfig?.ConnectionString?.StartsWith("type=arkade", StringComparison.InvariantCultureIgnoreCase) is true;
-    }
-
-    private async Task<ArkBalanceData> ComputeBalances(string walletId, CancellationToken cancellationToken)
-    {
-        var currentTime = await bitcoinTimeChainProvider.GetChainTime(cancellationToken);
-        var allCoins = await arkadeSpender.GetAvailableCoins(walletId, cancellationToken);
-
-        var coinsByRecoverableStatus = allCoins.ToLookup(coin => coin.IsRecoverable(currentTime));
-
-        var allSpendableOutpoints = allCoins.Select(coin => coin.Outpoint).ToHashSet();
-
-        var all = await vtxoStorage.GetVtxos(
-            walletIds: [walletId],
-            includeSpent: false,
-            cancellationToken: cancellationToken);
-
-        var unspendableBalance = all
-            .Where(vtxo => !allSpendableOutpoints.Contains(vtxo.OutPoint))
-            .Sum(vtxo => (long)vtxo.Amount);
-
-        var availableBalance = coinsByRecoverableStatus[false]
-            .Where(coin => !coin.Unrolled)
-            .Sum(coin => coin.Amount.Satoshi);
-        var recoverableBalance = coinsByRecoverableStatus[true].Sum(coin => coin.Amount.Satoshi);
-        var boardingBalance = allCoins.Where(coin => coin.Unrolled).Sum(coin => coin.Amount.Satoshi);
-
-        // Locked: VTXOs committed to active intents
-        var lockedOutpoints = await intentStorage.GetLockedVtxoOutpoints(walletId, cancellationToken);
-        var lockedSet = new HashSet<OutPoint>(lockedOutpoints);
-        var lockedBalance = coinsByRecoverableStatus[false]
-            .Where(coin => !coin.Unrolled && lockedSet.Contains(coin.Outpoint))
-            .Sum(coin => coin.Amount.Satoshi);
-
-        return new ArkBalanceData
-        {
-            AvailableSats = availableBalance - lockedBalance,
-            LockedSats = lockedBalance,
-            RecoverableSats = recoverableBalance,
-            UnspendableSats = unspendableBalance,
-            BoardingSats = boardingBalance
-        };
     }
 
     /// <summary>
@@ -1347,48 +1291,6 @@ public class ArkGreenfieldController(
         });
 
         return true;
-    }
-
-    private async Task<string?> FindManualReceiveAddress(string walletId, CancellationToken cancellationToken)
-    {
-        var existingContracts = await contractStorage.GetContracts(
-            walletIds: [walletId],
-            isActive: true,
-            cancellationToken: cancellationToken);
-
-        var manualContract = existingContracts
-            .FirstOrDefault(c =>
-                c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") == "manual");
-
-        if (manualContract == null) return null;
-
-        var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-        var script = Script.FromHex(manualContract.Script);
-        var serverKey = terms.SignerKey.Extract().XOnlyPubKey;
-        var arkAddr = ArkAddress.FromScriptPubKey(script, serverKey);
-        return arkAddr.ToString(terms.Network.ChainName == ChainName.Mainnet);
-    }
-
-    private async Task<string?> FindManualBoardingAddress(string walletId, CancellationToken cancellationToken)
-    {
-        var existingContracts = await contractStorage.GetContracts(
-            walletIds: [walletId],
-            isActive: true,
-            contractTypes: [ArkBoardingContract.ContractType],
-            cancellationToken: cancellationToken);
-
-        var boardingEntity = existingContracts
-            .FirstOrDefault(c =>
-                c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") == "manual");
-
-        if (boardingEntity == null) return null;
-
-        var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-        var boardingContract = (ArkBoardingContract)ArkContractParser.Parse(
-            boardingEntity.Type, boardingEntity.AdditionalData, terms.Network)!;
-        return boardingContract.GetOnchainAddress(terms.Network).ToString();
     }
 
     #endregion

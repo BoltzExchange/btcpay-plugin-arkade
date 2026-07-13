@@ -67,6 +67,7 @@ public class ArkController(
     ArkOperatorHealthService arkOperatorHealth,
     BoltzHealthService boltzHealth,
     ArkadeSpendingService arkadeSpendingService,
+    ArkadeWalletService walletService,
     ArkWalletOwnershipService walletOwnership,
     ArkAutomatedPayoutSenderFactory payoutSenderFactory,
     PayoutProcessorService payoutProcessorService,
@@ -313,7 +314,7 @@ public class ArkController(
         ArkBalancesViewModel? balances = null;
         try
         {
-            balances = await GetArkBalances(config.WalletId!, cancellationToken);
+            balances = await walletService.GetBalances(config.WalletId!, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -600,11 +601,11 @@ public class ArkController(
 
         try
         {
-            var existingAddress = await FindManualReceiveAddress(config!.WalletId!, cancellationToken);
+            var existingAddress = await walletService.FindManualReceiveAddress(config!.WalletId!, cancellationToken);
             if (existingAddress != null)
                 model.Address = existingAddress;
 
-            var existingBoarding = await FindManualBoardingAddress(config.WalletId!, cancellationToken);
+            var existingBoarding = await walletService.FindManualBoardingAddress(config.WalletId!, cancellationToken);
             if (existingBoarding != null)
                 model.BoardingAddress = existingBoarding;
         }
@@ -639,7 +640,7 @@ public class ArkController(
                 model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
 
                 // Preserve existing ark address if any
-                var existingAddress = await FindManualReceiveAddress(config.WalletId!, cancellationToken);
+                var existingAddress = await walletService.FindManualReceiveAddress(config.WalletId!, cancellationToken);
                 if (existingAddress != null) model.Address = existingAddress;
             }
             else
@@ -653,7 +654,7 @@ public class ArkController(
                 model.Address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
 
                 // Preserve existing boarding address if any
-                var existingBoarding = await FindManualBoardingAddress(config.WalletId!, cancellationToken);
+                var existingBoarding = await walletService.FindManualBoardingAddress(config.WalletId!, cancellationToken);
                 if (existingBoarding != null) model.BoardingAddress = existingBoarding;
             }
 
@@ -665,48 +666,6 @@ public class ArkController(
         }
 
         return RedirectToAction(nameof(Receive), new { storeId });
-    }
-
-    private async Task<string?> FindManualReceiveAddress(string walletId, CancellationToken cancellationToken)
-    {
-        var existingContracts = await contractStorage.GetContracts(
-            walletIds: [walletId],
-            isActive: true,
-            contractTypes: [ArkPaymentContract.ContractType],
-            cancellationToken: cancellationToken);
-
-        var manualContract = existingContracts
-            .FirstOrDefault(c =>
-                c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") == "manual");
-
-        if (manualContract == null) return null;
-
-        var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-        var script = Script.FromHex(manualContract.Script);
-        var serverKey = terms.SignerKey.Extract().XOnlyPubKey;
-        var arkAddr = ArkAddress.FromScriptPubKey(script, serverKey);
-        return arkAddr.ToString(terms.Network.ChainName == ChainName.Mainnet);
-    }
-
-    private async Task<string?> FindManualBoardingAddress(string walletId, CancellationToken cancellationToken)
-    {
-        var existingContracts = await contractStorage.GetContracts(
-            walletIds: [walletId],
-            isActive: true,
-            contractTypes: [ArkBoardingContract.ContractType],
-            cancellationToken: cancellationToken);
-
-        var boardingEntity = existingContracts
-            .FirstOrDefault(c =>
-                c.ActivityState == ContractActivityState.AwaitingFundsBeforeDeactivate &&
-                c.Metadata?.GetValueOrDefault("Source") == "manual");
-
-        if (boardingEntity == null) return null;
-
-        var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-        var boardingContract = (ArkBoardingContract)ArkContractParser.Parse(boardingEntity.Type, boardingEntity.AdditionalData, terms.Network)!;
-        return boardingContract.GetOnchainAddress(terms.Network).ToString();
     }
 
     private static (IDestination? Destination, Money? Amount, ArkTxOutType OutputType) ParseOutputDestination(SpendOutputViewModel output, Network network)
@@ -872,7 +831,9 @@ public class ArkController(
             }
             else
             {
-                coins = await GetCoinsForOutpoints(config!.WalletId!, request.VtxoOutpoints, token);
+                coins = ArkSpendHelpers.ResolveCoinsForOutpoints(
+                    await arkadeSpender.GetAvailableCoins(config!.WalletId!, token),
+                    request.VtxoOutpoints);
             }
 
             if (coins.Count == 0)
@@ -1236,7 +1197,7 @@ public class ArkController(
         };
 
         // Load balances
-        model.Balances = await GetArkBalances(config!.WalletId!, token);
+        model.Balances = await walletService.GetBalances(config!.WalletId!, token);
 
         // Load available (spendable) coins - get outpoints from ArkCoin, then fetch ArkVtxo details
         var allCoins = await arkadeSpender.GetAvailableCoins(config.WalletId!, token);
@@ -1370,7 +1331,7 @@ public class ArkController(
             return errorResult;
 
         model.StoreId = storeId;
-        model.Balances = await GetArkBalances(config!.WalletId!, token);
+        model.Balances = await walletService.GetBalances(config!.WalletId!, token);
 
         // User's spend type preference (Arkade = offchain, Batch = onchain intent)
         var preferBatch = string.Equals(SpendType, "Batch", StringComparison.OrdinalIgnoreCase);
@@ -1566,13 +1527,13 @@ public class ArkController(
                         .Replace("lightning:", "", StringComparison.OrdinalIgnoreCase);
                 }
 
-                await arkadeSpendingService.Spend(store!, lnDestination, token);
+                var lnResult = await arkadeSpendingService.Spend(store!, lnDestination, token);
 
-                // Mark payout as paid if this fulfills a payout. A Lightning send returns no
-                // spend id, so this completes the payout (submarine-swap tracking would require
-                // ArkadeSpendingService.Spend to surface the swap id — see MarkPayoutFromSpendResult).
+                // A Lightning send settles through a submarine swap, so a payout it fulfills
+                // stays InProgress carrying the swap id until ArkPayoutSwapListener
+                // completes it once the swap settles.
                 if (!string.IsNullOrEmpty(lnOutput.PayoutId))
-                    await MarkPayoutFromSpendResult(lnOutput.PayoutId, null, token);
+                    await MarkPayoutFromSpendResult(lnOutput.PayoutId, lnResult, token);
 
                 return RedirectWithSuccess(nameof(StoreOverview), "Lightning payment sent!", new { storeId });
             }
@@ -1651,12 +1612,12 @@ public class ArkController(
                 {
                     var btcOutput = validOutputs[0];
                     // Chain swaps run their own coin selection, so the selected VTXOs are not passed as explicit inputs here.
-                    var swapId = await arkadeSpendingService.Spend(store!, btcOutput.Destination, settlementSats, null, token);
+                    var swapResult = await arkadeSpendingService.Spend(store!, btcOutput.Destination, settlementSats, null, token);
 
                     // A chain swap only *initiates* the transfer, so the payout stays InProgress
                     // (carrying the swap id) until it settles; it must not be marked delivered yet.
                     if (!string.IsNullOrEmpty(btcOutput.PayoutId))
-                        await MarkPayoutFromSpendResult(btcOutput.PayoutId, swapId, token);
+                        await MarkPayoutFromSpendResult(btcOutput.PayoutId, swapResult, token);
 
                     return RedirectWithSuccess(nameof(StoreOverview),
                         "Bitcoin settlement initiated via chain swap. Funds arrive once the swap settles.",
@@ -1750,7 +1711,7 @@ public class ArkController(
                 // Mark payouts as paid if any outputs fulfill payouts
                 foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
                 {
-                    await MarkPayoutFromSpendResult(output.PayoutId!, txId.ToString(), token);
+                    await MarkPayoutFromSpendResult(output.PayoutId!, new SpendResult(txId.ToString(), null), token);
                 }
 
                 return RedirectWithSuccess(nameof(StoreOverview), $"Transaction sent successfully! TxId: {txId}", new { storeId });
@@ -1840,31 +1801,6 @@ public class ArkController(
         var keyStart = prefix.Length + 1;
         var keyLength = fieldName.Length - keyStart - 1;
         return keyLength > 0 ? fieldName.Substring(keyStart, keyLength) : null;
-    }
-
-    private async Task<List<ArkCoin>> GetCoinsForOutpoints(string walletId, List<string> outpoints, CancellationToken token)
-    {
-        var coins = new List<ArkCoin>();
-        var availableCoins = await arkadeSpender.GetAvailableCoins(walletId, token);
-
-        foreach (var outpointStr in outpoints)
-        {
-            var parts = outpointStr.Split(':');
-            if (parts.Length != 2) continue;
-
-            var txId = parts[0];
-            if (!uint.TryParse(parts[1], out var vout)) continue;
-
-            var coin = availableCoins.FirstOrDefault(c =>
-                c.Outpoint.Hash.ToString() == txId && c.Outpoint.N == vout);
-
-            if (coin != null)
-            {
-                coins.Add(coin);
-            }
-        }
-
-        return coins;
     }
 
     [HttpPost("stores/{storeId}/update-wallet-config")]
@@ -2597,8 +2533,7 @@ public class ArkController(
 
         try
         {
-            var contracts = await contractStorage.GetContracts(walletIds: [config!.WalletId], cancellationToken: cancellationToken);
-            await vtxoSyncService.PollScriptsForVtxos(contracts.Select(c => c.Script).ToHashSet(), cancellationToken);
+            await walletService.SyncWallet(config!.WalletId!, cancellationToken);
             return RedirectWithSuccess(nameof(StoreOverview), "Wallet synchronized successfully. All contracts and VTXOs have been updated.", new { storeId });
         }
         catch (Exception ex)
@@ -2814,68 +2749,6 @@ public class ArkController(
         return RedirectToAction(nameof(ConfigurePayoutProcessor), "Ark", new { storeId });
     }
 
-    [NonAction]
-    public async Task<ArkBalancesViewModel> GetArkBalances(string walletId, CancellationToken cancellationToken)
-    {
-        // Get all contract scripts for the wallet
-        // var contracts = await contractStorage.GetContracts(walletIds: [walletId], cancellationToken: cancellationToken);
-        // var contractScripts = contracts.Select(c => c.Script).ToList();
-
-        // Get unspent VTXOs for those contracts
-        // var vtxos = await vtxoStorage.GetVtxos(scripts: contractScripts, cancellationToken: cancellationToken);
-        var currentTime = await bitcoinTimeChainProvider.GetChainTime(cancellationToken);
-        var allCoins = await arkadeSpender.GetAvailableCoins(walletId, cancellationToken);
-
-        var coinsByRecoverableStatus = allCoins.ToLookup(coin => coin.IsRecoverable(currentTime));
-        // var spendableOutpoints = coinsByRecoverableStatus[false].Select(coin => coin.Outpoint).ToHashSet();
-        // var recoverableOutpoints = coinsByRecoverableStatus[true].Select(coin => coin.Outpoint).ToHashSet();
-
-        // Available: actually spendable right now (not recoverable, passes contract conditions)
-        // var availableBalance = vtxos
-        //     .Where(vtxo => spendableOutpoints.Contains(vtxo.OutPoint))
-        //     .Sum(vtxo => (long)vtxo.Amount);
-        //
-        // // Recoverable: spendable but marked as recoverable
-        // var recoverableBalance = vtxos
-        //     .Where(vtxo => recoverableOutpoints.Contains(vtxo.OutPoint))
-        //     .Sum(vtxo => (long)vtxo.Amount);
-        // Unspendable: unspent VTXOs that don't pass contract conditions yet (e.g., HTLC timelock not reached)
-        // These are not recoverable, not locked, but also not spendable
-        var allSpendableOutpoints = allCoins
-            .Select(coin => coin.Outpoint)
-            .ToHashSet();
-
-        var all = (await vtxoStorage
-            .GetVtxos(walletIds: [walletId],
-                includeSpent: false, cancellationToken: cancellationToken));
-
-        var unspendableBalance =
-            all.Where(vtxo => !allSpendableOutpoints.Contains(vtxo.OutPoint))
-            .Sum(vtxo => (long)vtxo.Amount);
-
-        var availableBalance = coinsByRecoverableStatus[false]
-            .Where(coin => !coin.Unrolled)
-            .Sum(coin => coin.Amount.Satoshi);
-        var recoverableBalance = coinsByRecoverableStatus[true].Sum(coin => coin.Amount.Satoshi);
-        var boardingBalance = allCoins.Where(coin => coin.Unrolled).Sum(coin => coin.Amount.Satoshi);
-
-        // Locked: VTXOs committed to active intents (WaitingToSubmit, WaitingForBatch)
-        var lockedOutpoints = await intentStorage.GetLockedVtxoOutpoints(walletId, cancellationToken);
-        var lockedSet = new HashSet<NBitcoin.OutPoint>(lockedOutpoints);
-        var lockedBalance = coinsByRecoverableStatus[false]
-            .Where(coin => !coin.Unrolled && lockedSet.Contains(coin.Outpoint))
-            .Sum(coin => coin.Amount.Satoshi);
-
-        return new ArkBalancesViewModel
-        {
-            AvailableBalance = availableBalance - lockedBalance,
-            LockedBalance = lockedBalance,
-            RecoverableBalance = recoverableBalance,
-            UnspendableBalance = unspendableBalance,
-            BoardingBalance = boardingBalance,
-        };
-    }
-
     [HttpGet("blockchain-info")]
     [AllowAnonymous]
     public async Task<IActionResult> GetBlockchainInfo(CancellationToken cancellationToken = default)
@@ -2903,7 +2776,7 @@ public class ArkController(
         if (adminWallet == null)
             return RedirectWithError(nameof(ListWallets), "Wallet not found.");
 
-        var balances = await GetArkBalances(walletId, cancellationToken);
+        var balances = await walletService.GetBalances(walletId, cancellationToken);
         var signerAvailable = await walletProvider.GetAddressProviderAsync(walletId, cancellationToken) != null;
 
         // Check Ark Operator connection using helper
@@ -3358,10 +3231,10 @@ public class ArkController(
 
     /// <summary>
     /// Marks a payout from the result of a spend. A real on-ledger txid completes the payout;
-    /// a chain-swap transfer id leaves it InProgress until the swap settles, so undelivered funds
-    /// are never reported as paid. Mirrors <see cref="ArkAutomatedPayoutProcessor"/>'s proof handling.
+    /// a swap id (chain or submarine) leaves it InProgress until the swap settles, so undelivered
+    /// funds are never reported as paid. Mirrors <see cref="ArkAutomatedPayoutProcessor"/>'s proof handling.
     /// </summary>
-    private async Task MarkPayoutFromSpendResult(string payoutId, string? spendResult, CancellationToken token)
+    private async Task MarkPayoutFromSpendResult(string payoutId, SpendResult? spendResult, CancellationToken token)
     {
         try
         {
@@ -3462,8 +3335,7 @@ public class ArkController(
                     }
                 }
 
-                var amountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
-                result.AmountSats = amountSats;
+                result.AmountSats = amountBtc is { } amount ? Money.Coins(amount).Satoshi : 0L;
                 result.IsValid = true;
                 return result;
             }

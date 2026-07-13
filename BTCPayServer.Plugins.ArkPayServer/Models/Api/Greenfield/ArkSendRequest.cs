@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
 
 /// <summary>
@@ -27,12 +29,12 @@ public class ArkSendRequest
 public class ArkSendResponse
 {
     /// <summary>
-    /// Transaction ID (Ark TX hash or Lightning payment hash).
+    /// Arkade transaction ID for direct Arkade sends; null when the send settles through a swap.
     /// </summary>
     public string? TxId { get; set; }
 
     /// <summary>
-    /// Swap ID if this triggered a Lightning or chain swap.
+    /// Swap ID when the send settles through a Lightning submarine swap or a chain swap.
     /// </summary>
     public string? SwapId { get; set; }
 }

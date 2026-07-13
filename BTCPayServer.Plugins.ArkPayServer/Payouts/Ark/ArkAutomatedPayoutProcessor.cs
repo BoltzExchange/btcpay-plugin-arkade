@@ -88,13 +88,13 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
                     {
                         try
                         {
-                            var txId = await _arkSpendingService.Spend(storeData, destinationBip21, CancellationToken.None);
+                            var result = await _arkSpendingService.Spend(storeData, destinationBip21, CancellationToken.None);
 
                             // A bitcoin destination is settled through an Ark->BTC chain swap, whose
                             // id is only a swap *initiation* — not delivered funds. Complete the payout
                             // only for a real on-ledger txid; a swap id leaves it InProgress until the
                             // swap settles, so we never report undelivered funds as paid.
-                            var proof = ArkPayoutProof.FromSpendResult(txId);
+                            var proof = ArkPayoutProof.FromSpendResult(result);
                             payoutHandler.SetProofBlob(payout, proof);
                             if (proof.ResolvedPayoutState is { } state)
                             {

@@ -24,10 +24,16 @@ public class ArkFeeEstimateRequest
     public string? CoinSelectionMode { get; set; }
 
     /// <summary>
-    /// Preferred spend type: <c>"Arkade"</c> (offchain, no fee) or <c>"Batch"</c> (joins the next round).
+    /// Preferred spend type: <c>"Arkade"</c> (offchain, no fee) or <c>"Batch"</c> (joins the next batch).
     /// Ignored for Lightning destinations.
     /// </summary>
     public string? SpendType { get; set; }
+
+    /// <summary>
+    /// Total input amount in satoshis. Used as the amount fallback when a single output omits
+    /// <see cref="ArkFeeEstimateOutput.AmountSats"/> (mirrors the send wizard's send-all estimate).
+    /// </summary>
+    public long TotalInputSats { get; set; }
 }
 
 /// <summary>
