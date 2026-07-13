@@ -7,13 +7,13 @@
 @using BTCPayServer.Payments
 @using BTCPayServer.Services
 @using NArk.Core.Contracts
-@using NArk.Core.Transport
+@using BTCPayServer
 @using static BTCPayServer.Plugins.ArkPayServer.Helpers.ArkViewHelpers
 @model BTCPayServer.Plugins.ArkPayServer.Models.StoreVtxosViewModel
 @inject IScopeProvider ScopeProvider
 @inject ArkNetworkConfig ArkNetworkConfig
 @inject IBitcoinBlockchain ChainTimeProvider
-@inject IClientTransport ClientTransport
+@inject BTCPayNetworkProvider NetworkProvider
 @inject TransactionLinkProviders TransactionLinkProviders
 
 @{
@@ -21,19 +21,7 @@
     var storeId = ScopeProvider.GetCurrentStoreId();
     var statusFilterCount = GetFilterCount(Model.Search, "status");
     var chainTime = await ChainTimeProvider.GetChainTime(Context.RequestAborted);
-
-    // Get network for address formatting
-    var mainnet = true;
-    Network network = Network.Main;
-    try
-    {
-        var serverInfo = await ClientTransport.GetServerInfoAsync();
-        mainnet = serverInfo.Network.ChainName == ChainName.Mainnet;
-        network = serverInfo.Network;
-    }
-    catch (Exception)
-    {
-    }
+    var (network, mainnet) = GetNetwork(NetworkProvider);
 }
 
 @section PageHeadContent

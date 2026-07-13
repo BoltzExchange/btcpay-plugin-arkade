@@ -63,7 +63,7 @@
         <PackageReference Include="NBXplorer.Client" Version="5.0.6" />
         <!-- Additional packages -->
         <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-        <PackageReference Include="Grpc.Net.ClientFactory" Version="2.76.0" />
+        <!-- Pins Microsoft.CodeAnalysis to BTCPayServer's version; EF Design alone downgrades it and NuGet then fails with NU1107 -->
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.6"/>
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />

@@ -3,37 +3,24 @@
 @using BTCPayServer.Plugins.ArkPayServer.Helpers
 @using BTCPayServer.Payments
 @using BTCPayServer.Services
-@using NArk.Abstractions.Blockchain
 @using NBitcoin
 @using NArk.Abstractions.VTXOs
 @using NArk.Core.Contracts
 @using NArk.Abstractions.Contracts
-@using NArk.Core.Transport
+@using BTCPayServer
 @using NArk.Hosting
 @using NArk.Swaps.Models
 @using static BTCPayServer.Plugins.ArkPayServer.Helpers.ArkViewHelpers
 @model BTCPayServer.Plugins.ArkPayServer.Models.StoreContractsViewModel
 @inject IScopeProvider ScopeProvider
-@inject IClientTransport ClientTransport
+@inject BTCPayNetworkProvider NetworkProvider
 @inject ArkNetworkConfig ArkNetworkConfig
-@inject IBitcoinBlockchain ChainTimeProvider
 @inject TransactionLinkProviders TransactionLinkProviders
 @{
     Layout = "_Layout";
     ViewData.SetActivePage(category: "Ark", activePage: "Contracts", title: "Arkade - Contracts");
     var storeId = ScopeProvider.GetCurrentStoreId();
-    var mainnet = true;
-    var chainTime = await ChainTimeProvider.GetChainTime(Context.RequestAborted);
-    Network network = Network.Main;
-    try
-    {
-        var serverInfo = await ClientTransport.GetServerInfoAsync();
-        mainnet = serverInfo.Network.ChainName == ChainName.Mainnet;
-        network = serverInfo.Network;
-    }
-    catch (Exception ex)
-    {
-    }
+    var (network, mainnet) = GetNetwork(NetworkProvider);
 
     var statusFilterCount = GetFilterCount(Model.Search, "status");
     var mainColumnCount = Model.Debug ? 11 : 9;
@@ -79,7 +66,6 @@
         <div>
             <strong>Debug Mode Active</strong> - Showing cache and listening status.<br/>
             Tracked contracts cache: <strong>@Model.CachedContractScripts.Count</strong> active contracts<br/>
-            Boltz swaps cache: <strong>@Model.CachedSwapScripts.Count</strong> active swaps<br/>
             VtxoSyncService listening: <strong>@Model.ListenedScripts.Count</strong> scripts
         </div>
     </div>
@@ -201,7 +187,6 @@
                         ArkVtxo[]? vtxos = [];
                         var hasVtxos = Model.ContractVtxos.TryGetValue(contract.Script, out vtxos) && vtxos.Any();
                         var hasUnspentVtxos = hasVtxos && vtxos.Any(v => !v.IsSpent());
-                        var hasRecoverableVtxos = hasVtxos && vtxos.Any(v => v.CanSpendOffchain(chainTime) || !v.IsSpent());
 
                         ArkSwap[]? swaps = [];
                         var hasSwaps = Model.ContractSwaps.TryGetValue(contract.Script, out swaps) && swaps.Any();
@@ -218,12 +203,6 @@
                             </td>
                             <td class="align-middle">
                                 <vc:truncate-center text="@contract.Type" classes="truncate-center-id"/>
-                                @* @if (arkContract is VHTLCContract htlcContract && hasRecoverableVtxos) *@
-                                @* { *@
-                                @*     <div class="htlc-countdown mt-1" data-locktime="@htlcContract.RefundLocktime.Value" data-is-timelock="@htlcContract.RefundLocktime.IsTimeLock.ToString().ToLower()"> *@
-                                @*         <small>Refund: <span class="countdown-value">calculating...</span></small> *@
-                                @*     </div> *@
-                                @* } *@
                             </td>
                             <td class="align-middle">
                                 <vc:truncate-center text="@arkContract.ToString()" classes="truncate-center-id"/>
@@ -302,10 +281,6 @@
                                     {
                                         <span class="badge text-bg-info" title="In tracked contracts cache">📌</span>
                                     }
-                                    @if (Model.CachedSwapScripts.Contains(contract.Script))
-                                    {
-                                        <span class="badge text-bg-info ms-1" title="In active swaps cache">🔄</span>
-                                    }
                                 </td>
                                 <td class="align-middle text-center">
                                     @if (Model.ListenedScripts.Contains(contract.Script))
@@ -358,11 +333,7 @@
                                     {
                                         <h6 class="mb-3">VTXOs</h6>
                                         <div class="mb-4">
-                                            <partial name="_VtxoTable" model="vtxos" view-data='new ViewDataDictionary(ViewData) {
-                                                { "ShowLinks", true },
-                                                { "UseTimeAgo", true },
-                                                { "TimeColumnLabel", "Seen" }
-                                            }' />
+                                            <partial name="_VtxoTable" model="vtxos" view-data='new ViewDataDictionary(ViewData) { { "ShowLinks", true } }' />
                                         </div>
                                     }
 
@@ -472,8 +443,6 @@ else
         </div>
     </div>
 </div>
-
-<partial name="_HtlcCountdownScript" />
 
 @* Forms outside main form to avoid nested form issues *@
 <form id="syncContractForm" asp-action="SyncContract" method="post" asp-route-storeId="@storeId" style="display: none;">

@@ -48,7 +48,7 @@ public class ArkadeCheckoutModelExtension: ICheckoutModelExtension, IGlobalCheck
 
     public string Image => "arkade.svg";
 
-    public string Badge => "";//"👾";
+    public string Badge => "";
 
     void ICheckoutModelExtension.ModifyCheckoutModel(CheckoutModelContext context)
     {

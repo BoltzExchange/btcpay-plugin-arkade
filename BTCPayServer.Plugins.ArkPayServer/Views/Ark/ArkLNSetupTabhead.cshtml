@@ -12,10 +12,12 @@
 }
 
 
+@* EnableLightning is state-changing and POST-only, so submit the page's own setup
+   form (carrying its antiforgery token) at our action instead of navigating with GET. *@
 <input asp-for="LightningNodeType" value="LightningNodeType-Arkade" type="radio" id="LightningNodeType-Arkade" data-bs-toggle="pill"
        data-bs-target="#CustomSetup" role="tab" aria-controls="ArkadeSetup"
        aria-selected="@(isSelected ? "true" : "false")"
-       onclick="location.href='@url'"
+       onclick="this.form.action = '@url'; this.form.submit()"
        class="@(Model.LightningNodeType == LightningNodeType.Custom ? "active" : "")">
 <label asp-for="LightningNodeType" for="@($"LightningNodeType-Arkade")" text-translate="true">Use Arkade</label>
 
@@ -24,7 +26,6 @@
        <script>
     const triggerEl = document.getElementById('LightningNodeType-Arkade')
 
-    
     if (@isSelected) {
         
         // deactivate currently active tab and activate this tab
@@ -38,12 +39,5 @@
            
         }
     }
-    
-    // document.addEventListener('DOMContentLoaded', () => {
-    //     triggerEl.addEventListener('click', () => {
-    //         //if our new input is now checked, 
-    //        
-    //     })
-    // })
 </script>
 }

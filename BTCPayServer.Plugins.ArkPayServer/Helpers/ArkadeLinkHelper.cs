@@ -24,9 +24,11 @@ public static class ArkadeLinkHelper
     public static string GetTransactionLink(ArkNetworkConfig config, string txId)
     {
         return config.ExplorerUri is not null ? $"{config.ExplorerUri.TrimEnd('/')}/tx/{txId}" : $"{config.ArkUri.TrimEnd('/')}/indexer/v1/tx/{txId}";
-    }    public static string GetCommitmentTransactionLink(ArkNetworkConfig config, string txId)
+    }
+
+    public static string GetCommitmentTransactionLink(ArkNetworkConfig config, string txId)
     {
-        return config.ExplorerUri is not null ? $"{config.ExplorerUri.TrimEnd('/')}/tx/{txId}" : $"{config.ArkUri.TrimEnd('/')}/indexer/v1/tcommtmentTx/{txId}";
+        return config.ExplorerUri is not null ? $"{config.ExplorerUri.TrimEnd('/')}/tx/{txId}" : $"{config.ArkUri.TrimEnd('/')}/indexer/v1/commitmentTx/{txId}";
     }
     
     public static string GetScriptLink(ArkNetworkConfig config, string script)
@@ -59,25 +61,8 @@ public static class ArkadeLinkHelper
         return GetScriptLink(config, scriptHex);
     }
 
-    #region Formatting Utilities
-
     /// <summary>
     /// Generates a formatted outpoint string (txid:index).
     /// </summary>
     public static string FormatOutpoint(string txId, uint outputIndex) => $"{txId}:{outputIndex}";
-
-    /// <summary>
-    /// Generates a formatted outpoint string (txid:index).
-    /// </summary>
-    public static string FormatOutpoint(OutPoint outpoint) => outpoint.ToString();
-
-    /// <summary>
-    /// Generates a short version of an outpoint for display (first 8...last 8 chars).
-    /// </summary>
-    public static string FormatOutpointShort(string outpoint)
-    {
-        return outpoint.Length > 20 ? $"{outpoint[..8]}...{outpoint[^8..]}" : outpoint;
-    }
-
-    #endregion
 }

@@ -13,8 +13,8 @@
     var settlementValidationError = ViewData.ModelState
         .Where(entry => entry.Key.StartsWith(nameof(Model.SettlementInputs), StringComparison.Ordinal))
         .Any(entry => entry.Value?.Errors.Count > 0);
-    var importExistingActive = Model.Mode == WalletSetupMode.Auto && hasWalletValue;
-    var createNewActive = Model.Mode == WalletSetupMode.Auto && !hasWalletValue && hasValidationError;
+    var importExistingActive = hasWalletValue;
+    var createNewActive = !hasWalletValue && hasValidationError;
     var settlementStepActive = settlementValidationError && (importExistingActive || createNewActive);
 }
 
@@ -52,7 +52,6 @@
         <div class="card">
             <div class="card-body">
                 <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId" id="importExistingForm">
-                    <input type="hidden" asp-for="Mode" value="@WalletSetupMode.Auto" />
                     <div data-wallet-step class="@(settlementValidationError && importExistingActive ? "d-none" : "")">
                         <div class="form-group mb-3">
                             <label asp-for="Wallet" class="form-label">Seed phrase</label>
@@ -98,7 +97,6 @@
         <div class="card">
             <div class="card-body">
                 <form asp-action="InitialSetup" method="post" asp-route-storeId="@storeId" id="createNewForm">
-                    <input type="hidden" asp-for="Mode" value="@WalletSetupMode.Auto" />
                     <input type="hidden" asp-for="Wallet" value="" />
                     <partial name="_InitialSettlementOptions" model="Model" view-data='new ViewDataDictionary(ViewData) {
                         { "SettlementPrefix", "createNew" },

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace BTCPayServer.Plugins.ArkPayServer.Models.Api;
 
 /// <summary>
@@ -13,10 +15,12 @@ public class SuggestCoinsRequest
     /// <summary>
     /// Required amount in satoshis. Null means "send all".
     /// </summary>
+    [Range(1, long.MaxValue)]
     public long? AmountSats { get; set; }
 
     /// <summary>
     /// Outpoints to exclude from selection (already used elsewhere).
     /// </summary>
+    [MaxLength(500)]
     public List<string>? ExcludeOutpoints { get; set; }
 }

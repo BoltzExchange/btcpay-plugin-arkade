@@ -1,6 +1,8 @@
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
+using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Services;
+using Microsoft.Extensions.DependencyInjection;
 using NArk.Abstractions.Wallets;
 using NArk.Core;
 using NArk.Core.Services;
@@ -14,7 +16,12 @@ namespace BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 public class ArkadePaymentMethodHandler(
     BTCPayServerEnvironment btcPayServerEnvironment,
     IContractService contractService,
-    IClientTransport clientTransport
+    IClientTransport clientTransport,
+    // IServiceProvider, not ArkadeLightningLimitsService: the limits service depends on
+    // PaymentMethodHandlerDictionary, which is built from every IPaymentMethodHandler —
+    // including this one — so injecting it directly creates a DI cycle. Resolving lazily
+    // at prompt-configuration time sidesteps that.
+    IServiceProvider serviceProvider
 ) : IPaymentMethodHandler
 {
     public PaymentMethodId PaymentMethodId => ArkadePlugin.ArkadePaymentMethodId;
@@ -39,7 +46,8 @@ public class ArkadePaymentMethodHandler(
             throw new PaymentMethodUnavailableException("Arkade payment method not configured");
         }
 
-        if (!arkadePaymentMethodConfig.AllowSubDustAmounts && Money.Coins(context.Prompt.Calculate().Due) < serverInfo.Dust)
+        var due = Money.Coins(context.Prompt.Calculate().Due);
+        if (!arkadePaymentMethodConfig.AllowSubDustAmounts && due < serverInfo.Dust)
         {
             throw new PaymentMethodUnavailableException("Amount too small");
         }
@@ -49,7 +57,15 @@ public class ArkadePaymentMethodHandler(
             NextContractPurpose.Receive,
             metadata: new Dictionary<string, string> { ["Source"] = $"invoice:{context.InvoiceEntity.Id}" },
             cancellationToken: CancellationToken.None);
-        var details = new ArkadePromptDetails(arkadePaymentMethodConfig.WalletId, contract);
+
+        // Decide the payment link's lightning= inclusion here, where async is available,
+        // so ArkadePaymentLinkExtension's sync GetPaymentLink never blocks on Boltz limits.
+        var includeLightning = await serviceProvider.GetRequiredService<ArkadeLightningLimitsService>()
+            .CanSupportLightningAsync(store, due.Satoshi, CancellationToken.None);
+        var details = new ArkadePromptDetails(arkadePaymentMethodConfig.WalletId, contract)
+        {
+            IncludeLightningInPaymentLink = includeLightning
+        };
         var address = contract.GetArkAddress();
 
         context.Prompt.Destination = address.ToString(btcPayServerEnvironment.NetworkType == ChainName.Mainnet);

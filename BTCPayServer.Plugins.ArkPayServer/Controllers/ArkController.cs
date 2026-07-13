@@ -11,6 +11,7 @@ using BTCPayServer.Payments.Lightning;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Plugins.ArkPayServer.Data;
 using BTCPayServer.Plugins.ArkPayServer.Exceptions;
+using BTCPayServer.Plugins.ArkPayServer.Helpers;
 using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Models;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api;
@@ -60,6 +61,7 @@ public class ArkController(
     BoltzLimitsValidator? boltzLimitsValidator,
     BoltzClient? boltzClient,
     ArkNetworkConfig arkNetworkConfig,
+    BTCPayNetworkProvider networkProvider,
     ArkPayoutHandler arkPayoutHandler,
     StoreRepository storeRepository,
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
@@ -159,7 +161,7 @@ public class ArkController(
 
         try
         {
-            var walletSettings = GetFromInputWallet(model.Wallet, model.Mode);
+            var walletSettings = GetFromInputWallet(model.Wallet);
 
             string walletId;
             try
@@ -237,7 +239,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            ModelState.AddModelError(nameof(model.Wallet), ex.Message);
+            logger.LogWarning(ex, "Arkade initial setup failed for store {StoreId}", store.Id);
+            ModelState.AddModelError(nameof(model.Wallet), DescribeArkError(ex, "Could not set up wallet"));
             return View(model);
         }
     }
@@ -283,7 +286,7 @@ public class ArkController(
             }
             catch (Exception ex)
             {
-                recoveryStatusTracker.SetFailed(walletId, ex.Message);
+                recoveryStatusTracker.SetFailed(walletId, ArkOperatorAvailability.Describe(ex));
                 logger.LogWarning(ex, "Background wallet recovery failed for wallet {WalletId}", walletId);
             }
         });
@@ -440,14 +443,19 @@ public class ArkController(
                 .Take(5)
                 .ToListAsync(cancellationToken);
 
+            // Fee stat: project only the columns the fee math needs.
+            var network = networkProvider.BTC.NBitcoinNetwork;
             var settledSwaps = await db.Swaps
                 .Where(s => s.WalletId == config.WalletId! && s.Status == ArkSwapStatus.Settled)
+                .Select(s => new { s.SwapType, s.ExpectedAmount, s.Invoice, s.MetadataJson })
                 .ToListAsync(cancellationToken);
-            swapFeesSats = settledSwaps.Sum(s => GetSwapFeeSats(s) ?? 0L);
+            swapFeesSats = settledSwaps.Sum(s =>
+                GetSettledSwapFeeSats(s.SwapType, s.ExpectedAmount, s.Invoice, s.MetadataJson, network) ?? 0L);
 
             foreach (var swap in settlementSwaps)
             {
-                var (sourceAmountSats, destinationAmountSats, feesPaidSats) = GetChainSwapAmounts(swap);
+                var (sourceAmountSats, destinationAmountSats, feesPaidSats) =
+                    GetChainSwapAmounts(swap.ExpectedAmount, swap.MetadataJson);
                 var displayAmountSats = destinationAmountSats ?? sourceAmountSats;
 
                 recentPayments.Add(new RecentPaymentViewModel
@@ -489,7 +497,7 @@ public class ArkController(
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             WalletBackedUp = config.WalletBackedUp ?? true,
             HasCurrentWalletFunds = totalVtxoCount > 0,
-            Wallet = wallet?.Secret,
+            HasSecret = !string.IsNullOrEmpty(wallet?.Secret),
             WalletType = wallet?.WalletType ?? WalletType.HD,
             RecoveryStatus = config.WalletId is { } recoveryWalletId ? recoveryStatusTracker.Get(recoveryWalletId) : null,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
@@ -898,7 +906,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return Json(new FeeEstimateResponse { Error = ex.Message });
+            logger.LogWarning(ex, "Fee estimation failed for store {StoreId}", storeId);
+            return Json(new FeeEstimateResponse { Error = DescribeArkError(ex, "Fee estimation failed") });
         }
     }
 
@@ -919,7 +928,7 @@ public class ArkController(
         try
         {
             var serverInfo = await clientTransport.GetServerInfoAsync(token);
-            var parsed = await ParseSend2DestinationAsync(request.Destination, request.AmountBtc, serverInfo.Network, token);
+            var parsed = await ParseSendDestinationAsync(request.Destination, request.AmountBtc, serverInfo.Network, token);
 
             return Json(new ParseDestinationResponse
             {
@@ -933,18 +942,19 @@ public class ArkController(
                 PayoutId = parsed.PayoutId,
                 IsValid = parsed.IsValid,
                 Error = parsed.Error,
-                IsBip21 = parsed.Type is Send2DestinationType.Bip21Ark or Send2DestinationType.Bip21Lightning
+                IsBip21 = parsed.Type is SendDestinationType.Bip21Ark or SendDestinationType.Bip21Lightning
                           || parsed.RawDestination.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase),
-                IsLightning = parsed.Type is Send2DestinationType.LightningInvoice or Send2DestinationType.Bip21Lightning
-                              or Send2DestinationType.Lnurl,
-                IsLnurl = parsed.Type == Send2DestinationType.Lnurl,
+                IsLightning = parsed.Type is SendDestinationType.LightningInvoice or SendDestinationType.Bip21Lightning
+                              or SendDestinationType.Lnurl,
+                IsLnurl = parsed.Type == SendDestinationType.Lnurl,
                 LnurlMinSats = parsed.LnurlMinSats,
                 LnurlMaxSats = parsed.LnurlMaxSats,
             });
         }
         catch (Exception ex)
         {
-            return Json(new ParseDestinationResponse { Error = ex.Message });
+            logger.LogWarning(ex, "Destination parsing failed for store {StoreId}", storeId);
+            return Json(new ParseDestinationResponse { Error = DescribeArkError(ex, "Could not parse destination") });
         }
     }
 
@@ -961,6 +971,9 @@ public class ArkController(
         var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null)
             return Json(new SuggestCoinsResponse { Error = "Store not configured" });
+
+        if (!ModelState.IsValid)
+            return Json(new SuggestCoinsResponse { Error = "Invalid request" });
 
         try
         {
@@ -1046,130 +1059,9 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return Json(new SuggestCoinsResponse { Error = ex.Message });
+            logger.LogWarning(ex, "Coin selection failed for store {StoreId}", storeId);
+            return Json(new SuggestCoinsResponse { Error = DescribeArkError(ex, "Coin selection failed") });
         }
-    }
-
-    /// <summary>
-    /// Pre-flight validation before executing spend.
-    /// </summary>
-    [HttpPost("stores/{storeId}/validate-spend")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> ValidateSpend(
-        string storeId,
-        [FromBody] ValidateSpendRequest request,
-        CancellationToken token)
-    {
-        var (store, config, errorResult) = ValidateStoreAndConfig();
-        if (errorResult != null)
-            return Json(new ValidateSpendResponse { Errors = { "Store not configured" } });
-
-        var response = new ValidateSpendResponse();
-        var hasLightning = false;
-        var hasRecoverableCoins = false;
-
-        // Validate coins exist and are spendable
-        if (request.VtxoOutpoints.Any())
-        {
-            var outpoints = ParseOutpoints(request.VtxoOutpoints.ToArray());
-
-            var vtxos = await vtxoStorage.GetVtxos(
-                walletIds: [config!.WalletId!],
-                outpoints: outpoints.ToList(),
-                includeSpent: false,
-                cancellationToken: token);
-
-            if (vtxos.Count != request.VtxoOutpoints.Count)
-            {
-                response.Errors.Add("Some selected coins are no longer available");
-            }
-
-            hasRecoverableCoins = vtxos.Any(v => v.Swept);
-        }
-        else
-        {
-            response.Errors.Add("No coins selected");
-        }
-
-        // Get network for address parsing
-        var serverInfo = await clientTransport.GetServerInfoAsync(token);
-        var network = serverInfo.Network;
-
-        // Validate each output
-        for (int i = 0; i < request.Outputs.Count; i++)
-        {
-            var output = request.Outputs[i];
-            var result = new OutputValidationResult { Index = i };
-
-            if (string.IsNullOrWhiteSpace(output.Destination))
-            {
-                result.Error = "Destination required";
-            }
-            else
-            {
-                var destination = output.Destination.Trim();
-
-                // Check for Lightning first (BOLT11, LNURL, Lightning Address)
-                if (IsLightningDestination(destination))
-                {
-                    result.DetectedType = destination.IsValidEmail() ||
-                        destination.StartsWith("lnurl", StringComparison.OrdinalIgnoreCase)
-                        ? DestinationType.LnurlPay
-                        : DestinationType.LightningInvoice;
-                    hasLightning = true;
-                }
-                else
-                {
-                    // Use existing ParseOutputDestination helper
-                    var spendOutput = new SpendOutputViewModel { Destination = destination };
-                    var (dest, amount, outputType) = ParseOutputDestination(spendOutput, network);
-
-                    if (dest == null)
-                    {
-                        result.Error = "Invalid address format";
-                    }
-                    else if (outputType == ArkTxOutType.Vtxo)
-                    {
-                        result.DetectedType = DestinationType.ArkAddress;
-                    }
-                    else
-                    {
-                        result.DetectedType = DestinationType.BitcoinAddress;
-                    }
-                }
-            }
-
-            response.OutputResults.Add(result);
-        }
-
-        // Cross-validation rules
-        if (hasLightning)
-        {
-            if (request.Outputs.Count > 1)
-            {
-                response.Errors.Add("Lightning supports single output only");
-            }
-            if (hasRecoverableCoins)
-            {
-                response.Errors.Add("Lightning requires non-recoverable coins");
-            }
-            response.SpendType = SpendType.Swap;
-        }
-        else if (response.OutputResults.Any(r => r.DetectedType == DestinationType.BitcoinAddress))
-        {
-            response.SpendType = SpendType.Batch;
-        }
-        else if (hasRecoverableCoins)
-        {
-            response.SpendType = SpendType.Batch;
-        }
-        else
-        {
-            response.SpendType = SpendType.Offchain;
-        }
-
-        response.IsValid = !response.Errors.Any() && !response.OutputResults.Any(r => r.Error != null);
-        return Json(response);
     }
 
     /// <summary>
@@ -1190,10 +1082,7 @@ public class ArkController(
 
         var model = new SendWizardViewModel
         {
-            StoreId = storeId,
-            VtxoOutpoints = vtxos,
-            Destinations = destinations,
-            Destination = destination
+            StoreId = storeId
         };
 
         // Load balances
@@ -1264,7 +1153,7 @@ public class ArkController(
 
             foreach (var parsed in parsedDestinations)
             {
-                var isBip21 = parsed.Type is Send2DestinationType.Bip21Ark or Send2DestinationType.Bip21Lightning
+                var isBip21 = parsed.Type is SendDestinationType.Bip21Ark or SendDestinationType.Bip21Lightning
                               || parsed.RawDestination.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase);
                 var output = new SendOutputViewModel
                 {
@@ -1275,8 +1164,7 @@ public class ArkController(
                     PayoutId = parsed.PayoutId,
                     IsBip21Parsed = isBip21,
                     IsReadonly = isBip21,
-                    DetectedType = MapSend2TypeToDestinationType(parsed.Type),
-                    IsLightning = parsed.Type is Send2DestinationType.LightningInvoice or Send2DestinationType.Bip21Lightning,
+                    DetectedType = MapSendTypeToDestinationType(parsed.Type),
                     Error = parsed.Error
                 };
                 model.Outputs.Add(output);
@@ -1285,10 +1173,10 @@ public class ArkController(
         else if (!string.IsNullOrEmpty(destination))
         {
             var serverInfo = await clientTransport.GetServerInfoAsync(token);
-            var parsed = ParseSend2Destination(destination, null, serverInfo.Network);
-            var isBip21 = parsed.Type is Send2DestinationType.Bip21Ark or Send2DestinationType.Bip21Lightning
+            var parsed = ParseSendDestination(destination, null, serverInfo.Network);
+            var isBip21 = parsed.Type is SendDestinationType.Bip21Ark or SendDestinationType.Bip21Lightning
                           || destination.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase);
-            var isLightning = parsed.Type is Send2DestinationType.LightningInvoice or Send2DestinationType.Bip21Lightning;
+            var isLightning = parsed.Type is SendDestinationType.LightningInvoice or SendDestinationType.Bip21Lightning;
 
             model.Outputs.Add(new SendOutputViewModel
             {
@@ -1299,8 +1187,7 @@ public class ArkController(
                 PayoutId = parsed.PayoutId,
                 IsBip21Parsed = isBip21,
                 IsReadonly = isBip21 || isLightning,
-                DetectedType = MapSend2TypeToDestinationType(parsed.Type),
-                IsLightning = isLightning,
+                DetectedType = MapSendTypeToDestinationType(parsed.Type),
                 Error = parsed.Error
             });
         }
@@ -1476,7 +1363,8 @@ public class ArkController(
             }
             catch (Exception ex)
             {
-                model.Errors.Add($"Consolidation failed: {ex.Message}");
+                logger.LogWarning(ex, "Consolidation failed for store {StoreId}", storeId);
+                model.Errors.Add(DescribeArkError(ex, "Consolidation failed"));
                 return View("Send", model);
             }
         }
@@ -1539,7 +1427,8 @@ public class ArkController(
             }
             catch (Exception ex)
             {
-                model.Errors.Add($"Lightning payment failed: {ex.Message}");
+                logger.LogWarning(ex, "Lightning payment failed for store {StoreId}", storeId);
+                model.Errors.Add(DescribeArkError(ex, "Lightning payment failed"));
                 return View("Send", model);
             }
         }
@@ -1625,7 +1514,8 @@ public class ArkController(
                 }
                 catch (Exception ex)
                 {
-                    model.Errors.Add($"Bitcoin settlement failed: {ex.Message}");
+                    logger.LogWarning(ex, "Bitcoin settlement failed for store {StoreId}", storeId);
+                    model.Errors.Add(DescribeArkError(ex, "Bitcoin settlement failed"));
                     return View("Send", model);
                 }
             }
@@ -1719,7 +1609,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            model.Errors.Add($"Transaction failed: {ex.Message}");
+            logger.LogWarning(ex, "Send failed for store {StoreId}", storeId);
+            model.Errors.Add(DescribeArkError(ex, "Transaction failed"));
             return View("Send", model);
         }
     }
@@ -1854,40 +1745,6 @@ public class ArkController(
         return RedirectToAction(nameof(Settings), new { storeId });
     }
 
-    [HttpPost("stores/{storeId}/destination")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> UpdateDestination(string storeId, string destination, CancellationToken ct)
-    {
-        var (_, config, errorResult) = ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        destination = destination?.Trim() ?? string.Empty;
-        if (!NArk.Abstractions.ArkAddress.TryParse(destination, out var parsed) || parsed is null)
-            return RedirectWithError(nameof(StoreOverview), "Invalid Arkade address. Please enter a valid ark1… address.", new { storeId });
-
-        NArk.Core.ArkServerInfo serverInfo;
-        try
-        {
-            serverInfo = await clientTransport.GetServerInfoAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            return RedirectWithError(nameof(StoreOverview), DescribeArkError(ex, "Could not reach the Arkade server"), new { storeId });
-        }
-
-        if (NArk.Core.Services.DestinationSafety.IsStale(parsed, serverInfo))
-            return RedirectWithError(nameof(StoreOverview),
-                "That address is still on a deprecated signer; use a current Arkade address.", new { storeId });
-
-        var wallet = await walletStorage.GetWalletById(config!.WalletId!, ct);
-        if (wallet is null)
-            return RedirectWithError(nameof(StoreOverview), "Wallet not found.", new { storeId });
-
-        await walletStorage.UpsertWallet(wallet with { Destination = destination }, updateIfExists: true, ct);
-
-        return RedirectWithSuccess(nameof(StoreOverview), "Sweep destination re-confirmed.", new { storeId });
-    }
-
     [HttpGet("stores/{storeId}/contracts")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Contracts(
@@ -1954,7 +1811,6 @@ public class ArkController(
             ContractVtxos = contractVtxos,
             ContractSwaps = contractSwaps,
             Debug = debug,
-            CachedSwapScripts = [], // Active swap scripts tracked by SwapsManagementService internally
             CachedContractScripts = (await contractStorage.GetContracts(walletIds: [config.WalletId], isActive: true, cancellationToken: HttpContext.RequestAborted))
                 .Select(c => c.Script).ToHashSet(),
             ListenedScripts = debug ? vtxoSyncService.ListenedScripts.ToHashSet() : []
@@ -1970,20 +1826,24 @@ public class ArkController(
         string? searchTerm = null,
         string? searchText = null,
         int skip = 0,
-        int count = 50,
-        bool debug = false)
+        int count = 50)
     {
         var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
-        // Get status filter using helper
-        var statusFilter = ParseEnumFilter<ArkSwapStatus>(searchTerm, "status", s => s switch
+        // Status filter: multi-select like the VTXO page. Without an explicit choice,
+        // hide Failed swaps — expired unpaid Lightning invoices pile up there as noise.
+        var search = new SearchString(searchTerm);
+        if (!search.ContainsFilter("status"))
         {
-            "pending" => ArkSwapStatus.Pending,
-            "settled" => ArkSwapStatus.Settled,
-            "failed" => ArkSwapStatus.Failed,
-            _ => null
-        });
+            searchTerm = "status:pending,status:settled,status:refunded";
+            search = new SearchString(searchTerm);
+        }
+
+        var statusFilter = search.GetFilterArray("status")
+            .SelectMany(MapSwapStatusFilter)
+            .Distinct()
+            .ToArray();
 
         // Get type filter using helper
         var typeFilter = ParseEnumFilter<ArkSwapType>(searchTerm, "type", t => t switch
@@ -1999,7 +1859,7 @@ public class ArkController(
 
         var swaps = await swapStorage.GetSwaps(
             walletIds: [config!.WalletId!],
-            status: statusFilter != null ? [statusFilter.Value] : null,
+            status: statusFilter.Length > 0 ? statusFilter : null,
             swapTypes: typeFilter != null ? [typeFilter.Value] : null,
             searchText: searchText,
             skip: skip,
@@ -2021,9 +1881,7 @@ public class ArkController(
             Skip = skip,
             Count = count,
             SearchText = searchText,
-            Search = new SearchString(searchTerm),
-            Debug = debug,
-            CachedSwapIds = []
+            Search = new SearchString(searchTerm)
         };
 
         return View(model);
@@ -2062,7 +1920,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Swaps), $"Error polling swap: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Failed to poll swap {SwapId}", swapId);
+            return RedirectWithError(nameof(Swaps), $"Failed to poll swap {swapId}. Check the Boltz connection and try again.", new { storeId });
         }
     }
 
@@ -2074,45 +1933,44 @@ public class ArkController(
         return BoltzSwapStatus.ToArkSwapStatus(status) ?? currentStatus;
     }
 
-    private static long? GetSwapFeeSats(ArkSwapEntity swap)
+    private static ArkSwapStatus[] MapSwapStatusFilter(string filter) => filter switch
     {
-        if (swap.Status != ArkSwapStatus.Settled)
-            return null;
+        // Unknown rides with Pending: the rest of the plugin treats it as in-flight.
+        "pending" => [ArkSwapStatus.Pending, ArkSwapStatus.Unknown],
+        "settled" => [ArkSwapStatus.Settled],
+        "refunded" => [ArkSwapStatus.Refunded],
+        "failed" => [ArkSwapStatus.Failed],
+        _ => []
+    };
 
-        return swap.SwapType switch
+    private static long? GetSettledSwapFeeSats(
+        ArkSwapType swapType,
+        long expectedAmountSats,
+        string invoice,
+        string? metadataJson,
+        Network network)
+    {
+        return swapType switch
         {
-            ArkSwapType.Submarine => TryGetBolt11AmountSats(swap.Invoice) is { } invoiceAmountSats
-                ? Math.Max(0, swap.ExpectedAmount - invoiceAmountSats)
+            ArkSwapType.Submarine => Bolt11Helper.TryGetAmountSats(invoice, network) is { } invoiceAmountSats
+                ? Math.Max(0, expectedAmountSats - invoiceAmountSats)
                 : null,
-            ArkSwapType.ReverseSubmarine => TryGetBolt11AmountSats(swap.Invoice) is { } invoiceAmountSats
-                ? Math.Max(0, invoiceAmountSats - swap.ExpectedAmount)
+            ArkSwapType.ReverseSubmarine => Bolt11Helper.TryGetAmountSats(invoice, network) is { } invoiceAmountSats
+                ? Math.Max(0, invoiceAmountSats - expectedAmountSats)
                 : null,
-            ArkSwapType.ChainBtcToArk or ArkSwapType.ChainArkToBtc => GetChainSwapAmounts(swap).FeesPaidSats,
+            ArkSwapType.ChainBtcToArk or ArkSwapType.ChainArkToBtc =>
+                GetChainSwapAmounts(expectedAmountSats, metadataJson).FeesPaidSats,
             _ => null
         };
     }
 
-    private static long? TryGetBolt11AmountSats(string invoice)
-    {
-        if (string.IsNullOrWhiteSpace(invoice))
-            return null;
-
-        foreach (var network in new[] { Network.RegTest, Network.TestNet, Network.Main })
-        {
-            if (BOLT11PaymentRequest.TryParse(invoice, out var bolt11, network) && bolt11 is not null)
-                return (long?)bolt11.MinimumAmount?.ToUnit(LightMoneyUnit.Satoshi);
-        }
-
-        return null;
-    }
-
     private static (long SourceAmountSats, long? DestinationAmountSats, long? FeesPaidSats)
-        GetChainSwapAmounts(ArkSwapEntity swap)
+        GetChainSwapAmounts(long expectedAmountSats, string? metadataJson)
     {
-        var boltzResponse = TryGetChainResponse(swap);
+        var boltzResponse = TryGetChainResponse(metadataJson);
         var sourceAmountSats = boltzResponse?.LockupDetails?.Amount > 0
             ? boltzResponse.LockupDetails.Amount
-            : swap.ExpectedAmount;
+            : expectedAmountSats;
         var destinationAmountSats = boltzResponse?.ClaimDetails?.Amount > 0
             ? boltzResponse.ClaimDetails.Amount
             : (long?)null;
@@ -2123,11 +1981,15 @@ public class ArkController(
         return (sourceAmountSats, destinationAmountSats, feesPaidSats);
     }
 
-    private static ChainResponse? TryGetChainResponse(ArkSwapEntity swap)
+    private static ChainResponse? TryGetChainResponse(string? metadataJson)
     {
+        if (string.IsNullOrEmpty(metadataJson))
+            return null;
+
         try
         {
-            return swap.Metadata?.TryGetValue(SwapMetadata.BoltzResponse, out var raw) == true
+            var metadata = JsonSerializer.Deserialize<Dictionary<string, string>>(metadataJson);
+            return metadata?.TryGetValue(SwapMetadata.BoltzResponse, out var raw) == true
                 ? JsonSerializer.Deserialize<ChainResponse>(raw)
                 : null;
         }
@@ -2347,7 +2209,6 @@ public class ArkController(
         });
     }
 
-    [HttpGet("stores/{storeId}/enable-ln")]
     [HttpPost("stores/{storeId}/enable-ln")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> EnableLightning(string storeId)
@@ -2416,60 +2277,6 @@ public class ArkController(
         return RedirectWithSuccess(nameof(GettingStarted), "Arkade wallet settings cleared.", new { storeId });
     }
 
-    [HttpPost("stores/{storeId}/force-refresh")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> ForceRefresh(string storeId, CancellationToken cancellationToken)
-    {
-        var (store, config, errorResult) = ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        try
-        {
-            var coins = await arkadeSpender.GetAvailableCoins(config!.WalletId!, cancellationToken);
-            if (coins.Count == 0)
-                return RedirectWithError(nameof(StoreOverview), "No VTXOs available to refresh.", new { storeId });
-
-            var refreshWallet = await walletStorage.GetWalletById(config.WalletId!, cancellationToken);
-            if (refreshWallet == null)
-            {
-                TempData[WellKnownTempData.ErrorMessage] = "Wallet not found.";
-                return RedirectToAction(nameof(StoreOverview), new { storeId });
-            }
-
-            // Get destination for refresh (back to same wallet)
-            // Use AwaitingFundsBeforeDeactivate so the contract can be deactivated if the intent fails
-            var destination = await contractService.DeriveContract(
-                refreshWallet.Id,
-                NextContractPurpose.SendToSelf,
-                ContractActivityState.AwaitingFundsBeforeDeactivate,
-                cancellationToken: cancellationToken);
-            var totalAmount = coins.Sum(c => c.TxOut.Value);
-
-
-            // Build ArkIntentSpec for refresh (send back to wallet)
-            var arkIntentSpec = new ArkIntentSpec(
-                [.. coins],
-                [new ArkTxOut(ArkTxOutType.Vtxo, totalAmount, destination.GetArkAddress())],
-                DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow.AddMinutes(5)
-            );
-
-            // Create intent via NNark (automatically cancels any overlapping intents)
-            var intentTxId = await intentGenerationService.GenerateManualIntent(
-                config.WalletId,
-                arkIntentSpec,
-                cancellationToken);
-
-            TempData[WellKnownTempData.SuccessMessage] = $"Refresh intent {intentTxId} created with {coins.Count} VTXOs. Intent will be submitted automatically.";
-        }
-        catch (Exception ex)
-        {
-            TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(ex, "Failed to create refresh intent");
-        }
-
-        return RedirectToAction(nameof(StoreOverview), new { storeId });
-    }
-
     [HttpPost("stores/{storeId}/cancel-intent")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> CancelIntent(string storeId, string intentTxId, CancellationToken cancellationToken)
@@ -2520,7 +2327,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Intents), $"Failed to cancel intent: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Failed to cancel intent {IntentTxId}", intentTxId);
+            return RedirectWithError(nameof(Intents), DescribeArkError(ex, "Failed to cancel intent"), new { storeId });
         }
     }
 
@@ -2538,7 +2346,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(StoreOverview), $"Failed to sync wallet: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Failed to sync wallet for store {StoreId}", storeId);
+            return RedirectWithError(nameof(StoreOverview), DescribeArkError(ex, "Failed to sync wallet"), new { storeId });
         }
     }
 
@@ -2560,7 +2369,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Contracts), $"Failed to sync contract: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Failed to sync contract for store {StoreId}", storeId);
+            return RedirectWithError(nameof(Contracts), DescribeArkError(ex, "Failed to sync contract"), new { storeId });
         }
     }
 
@@ -2588,7 +2398,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Contracts), $"Failed to delete contract: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Failed to delete contract for store {StoreId}", storeId);
+            return RedirectWithError(nameof(Contracts), DescribeArkError(ex, "Failed to delete contract"), new { storeId });
         }
     }
 
@@ -2631,7 +2442,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Contracts), $"Failed to import contract: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Failed to import contract for store {StoreId}", storeId);
+            return RedirectWithError(nameof(Contracts), DescribeArkError(ex, "Failed to import contract"), new { storeId });
         }
     }
 
@@ -2645,11 +2457,8 @@ public class ArkController(
         return lnEnabled;
     }
 
-    private static TemporaryWalletSettings GetFromInputWallet(string? wallet, WalletSetupMode mode = WalletSetupMode.Auto)
+    private static TemporaryWalletSettings GetFromInputWallet(string? wallet)
     {
-        if (mode != WalletSetupMode.Auto)
-            throw new Exception("Unsupported wallet setup mode.");
-
         if (string.IsNullOrWhiteSpace(wallet))
             return new TemporaryWalletSettings(GenerateWallet(), true);
 
@@ -2760,7 +2569,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { error = ex.Message });
+            logger.LogWarning(ex, "Failed to fetch blockchain info");
+            return StatusCode(500, new { error = "Failed to fetch blockchain info" });
         }
     }
 
@@ -2797,7 +2607,7 @@ public class ArkController(
             Balances = balances,
             WalletId = walletId,
             SignerAvailable = signerAvailable,
-            Wallet = adminWallet.Secret,
+            HasSecret = !string.IsNullOrEmpty(adminWallet.Secret),
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
             ArkOperatorConnected = arkOperatorConnected,
             ArkOperatorError = ArkOperatorAvailability.DescribeMessage(arkOperatorError),
@@ -2845,7 +2655,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(AdminWalletOverview), $"Failed to delete wallet: {ex.Message}", new { walletId });
+            logger.LogWarning(ex, "Failed to delete wallet {WalletId}", walletId);
+            return RedirectWithError(nameof(AdminWalletOverview), DescribeArkError(ex, "Failed to delete wallet"), new { walletId });
         }
     }
 
@@ -2984,11 +2795,6 @@ public class ArkController(
         {
             switch (command)
             {
-                case "build-intent":
-                case "build-transaction":
-                    // Redirect to new unified Send wizard
-                    return RedirectToAction(nameof(Send), new { storeId, vtxos = string.Join(",", selectedItems) });
-
                 case "refresh-state":
                     // Look up selected VTXOs to get their scripts, then resolve contracts
                     var outpoints = selectedItems
@@ -3014,7 +2820,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Vtxos), $"Mass action failed: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "VTXO mass action {Command} failed for store {StoreId}", command, storeId);
+            return RedirectWithError(nameof(Vtxos), DescribeArkError(ex, "Mass action failed"), new { storeId });
         }
     }
 
@@ -3066,7 +2873,8 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Swaps), $"Mass action failed: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Swap mass action {Command} failed for store {StoreId}", command, storeId);
+            return RedirectWithError(nameof(Swaps), "Mass action failed. Check the Boltz connection and try again.", new { storeId });
         }
     }
 
@@ -3124,105 +2932,9 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            return RedirectWithError(nameof(Contracts), $"Mass action failed: {ex.Message}", new { storeId });
+            logger.LogWarning(ex, "Contract mass action {Command} failed for store {StoreId}", command, storeId);
+            return RedirectWithError(nameof(Contracts), DescribeArkError(ex, "Mass action failed"), new { storeId });
         }
-    }
-
-    [HttpPost("stores/{storeId}/contracts/vtxos-sublist/mass-action")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public IActionResult MassActionVtxosSublist(string storeId, string contractScript, string command, string[] selectedItems, CancellationToken cancellationToken)
-    {
-        var (store, config, errorResult) = ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        if (selectedItems.Length == 0)
-            return RedirectWithError(nameof(Contracts), "No items selected.", new { storeId });
-
-        try
-        {
-            switch (command)
-            {
-                case "build-intent":
-                    // Redirect to spend/intent builder with selected VTXOs
-                    return RedirectToAction(nameof(Send), new { storeId, vtxos = string.Join(",", selectedItems) });
-
-                default:
-                    return RedirectWithError(nameof(Contracts), $"Unknown command: {command}", new { storeId });
-            }
-        }
-        catch (Exception ex)
-        {
-            return RedirectWithError(nameof(Contracts), $"Mass action failed: {ex.Message}", new { storeId });
-        }
-    }
-
-    [HttpPost("stores/{storeId}/contracts/swaps-sublist/mass-action")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> MassActionSwapsSublist(string storeId, string contractScript, string command, string[] selectedItems, CancellationToken cancellationToken)
-    {
-        var (store, config, errorResult) = ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        if (selectedItems.Length == 0)
-            return RedirectWithError(nameof(Contracts), "No items selected.", new { storeId });
-
-        try
-        {
-            switch (command)
-            {
-                case "poll-status":
-                    if (boltzClient == null)
-                        return RedirectWithError(nameof(Contracts), "Boltz client is not configured.", new { storeId });
-
-                    var updatedSwapCount = 0;
-                    // Batch fetch all swaps at once for efficiency
-                    var swapsForContracts = await swapStorage.GetSwaps(
-                        walletIds: [config!.WalletId!],
-                        swapIds: selectedItems,
-                        cancellationToken: cancellationToken);
-                    var contractSwapsDict = swapsForContracts.ToDictionary(s => s.SwapId);
-
-                    foreach (var swapId in selectedItems)
-                    {
-                        if (!contractSwapsDict.TryGetValue(swapId, out var swap))
-                            continue;
-
-                        var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, cancellationToken);
-                        var newStatus = MapBoltzStatus(statusResponse.Status, swap.Status);
-
-                        if (swap.Status != newStatus)
-                        {
-                            await swapStorage.UpdateSwapStatus(config.WalletId!, swapId, newStatus, cancellationToken: cancellationToken);
-                            updatedSwapCount++;
-                        }
-                    }
-                    return RedirectWithSuccess(nameof(Contracts), $"Polled {selectedItems.Length} swaps. {updatedSwapCount} status updates.", new { storeId });
-
-                default:
-                    return RedirectWithError(nameof(Contracts), $"Unknown command: {command}", new { storeId });
-            }
-        }
-        catch (Exception ex)
-        {
-            return RedirectWithError(nameof(Contracts), $"Mass action failed: {ex.Message}", new { storeId });
-        }
-    }
-
-    /// <summary>
-    /// Parses outpoint strings (txid:index) into OutPoint objects.
-    /// </summary>
-    private static HashSet<OutPoint> ParseOutpoints(string[] outpointStrings)
-    {
-        var outpoints = new HashSet<OutPoint>();
-        foreach (var str in outpointStrings)
-        {
-            var parts = str.Split(':');
-            if (parts.Length == 2 && uint256.TryParse(parts[0], out var txid) && uint.TryParse(parts[1], out var index))
-            {
-                outpoints.Add(new OutPoint(txid, index));
-            }
-        }
-        return outpoints;
     }
 
     #endregion
@@ -3255,13 +2967,13 @@ public class ArkController(
         }
     }
 
-    private static DestinationType? MapSend2TypeToDestinationType(Send2DestinationType type) => type switch
+    private static DestinationType? MapSendTypeToDestinationType(SendDestinationType type) => type switch
     {
-        Send2DestinationType.ArkAddress => DestinationType.ArkAddress,
-        Send2DestinationType.Bip21Ark => DestinationType.Bip21Uri,
-        Send2DestinationType.Bip21Lightning => DestinationType.Bip21Uri,
-        Send2DestinationType.LightningInvoice => DestinationType.LightningInvoice,
-        Send2DestinationType.Lnurl => DestinationType.LnurlPay,
+        SendDestinationType.ArkAddress => DestinationType.ArkAddress,
+        SendDestinationType.Bip21Ark => DestinationType.Bip21Uri,
+        SendDestinationType.Bip21Lightning => DestinationType.Bip21Uri,
+        SendDestinationType.LightningInvoice => DestinationType.LightningInvoice,
+        SendDestinationType.Lnurl => DestinationType.LnurlPay,
         _ => null
     };
 
@@ -3301,25 +3013,25 @@ public class ArkController(
         return (bolt11.ToString(), null);
     }
 
-    private async Task<Send2DestinationViewModel> ParseSend2DestinationAsync(
+    private async Task<SendDestinationViewModel> ParseSendDestinationAsync(
         string rawDestination, decimal? amountBtc, Network network, CancellationToken token)
     {
         // Check if it's an LNURL or Lightning Address FIRST
         if (rawDestination.IsValidEmail() ||
             rawDestination.StartsWith("lnurl", StringComparison.OrdinalIgnoreCase))
         {
-            var result = new Send2DestinationViewModel { RawDestination = rawDestination };
+            var result = new SendDestinationViewModel { RawDestination = rawDestination };
             try
             {
                 var (info, lnurlError) = await ResolveLnurlAsync(rawDestination, token);
                 if (info == null)
                 {
-                    result.Type = Send2DestinationType.Lnurl;
+                    result.Type = SendDestinationType.Lnurl;
                     result.Error = lnurlError;
                     return result;
                 }
 
-                result.Type = Send2DestinationType.Lnurl;
+                result.Type = SendDestinationType.Lnurl;
                 result.ResolvedAddress = rawDestination;
                 result.LnurlMinSats = (long)info.MinSendable.ToUnit(LightMoneyUnit.Satoshi);
                 result.LnurlMaxSats = (long)info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi);
@@ -3341,22 +3053,22 @@ public class ArkController(
             }
             catch (Exception ex)
             {
-                result.Type = Send2DestinationType.Lnurl;
+                result.Type = SendDestinationType.Lnurl;
                 result.Error = $"LNURL resolution failed: {ex.Message}";
                 return result;
             }
         }
 
         // Delegate to existing sync method for all other types
-        return ParseSend2Destination(rawDestination, amountBtc, network);
+        return ParseSendDestination(rawDestination, amountBtc, network);
     }
 
     private static bool IsLightningDestination(string dest) => ArkSpendHelpers.IsLightningDestination(dest);
 
-    private static Send2DestinationViewModel ParseSend2Destination(string rawDestination, decimal? amountBtc, Network network)
+    private static SendDestinationViewModel ParseSendDestination(string rawDestination, decimal? amountBtc, Network network)
     {
         var parsed = ArkSpendHelpers.ParseSendDestination(rawDestination, amountBtc, network);
-        return new Send2DestinationViewModel
+        return new SendDestinationViewModel
         {
             RawDestination = parsed.RawDestination,
             Type = parsed.Type,
@@ -3375,9 +3087,9 @@ public class ArkController(
     /// - Full BIP21 URIs (comma-separated, may contain colons in scheme)
     /// - Simple format: addr:amount pairs (comma-separated)
     /// </summary>
-    private List<Send2DestinationViewModel> ParseDestinationsParam(string destinations, Network network)
+    private List<SendDestinationViewModel> ParseDestinationsParam(string destinations, Network network)
     {
-        var result = new List<Send2DestinationViewModel>();
+        var result = new List<SendDestinationViewModel>();
 
         // Smart split: don't split on commas inside BIP21 URIs
         // BIP21 URIs start with "bitcoin:" and may contain query params with commas
@@ -3416,22 +3128,19 @@ public class ArkController(
         if (!string.IsNullOrWhiteSpace(currentPart))
             parts.Add(currentPart.Trim());
 
-        int index = 0;
         foreach (var part in parts)
         {
             // Check if this is a BIP21 URI
             if (part.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase))
             {
-                var parsed = ParseSend2Destination(part, null, network);
-                parsed.Index = index++;
+                var parsed = ParseSendDestination(part, null, network);
                 result.Add(parsed);
             }
             // Check if this is a Lightning invoice
             else if (part.StartsWith("ln", StringComparison.OrdinalIgnoreCase) ||
                      part.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase))
             {
-                var parsed = ParseSend2Destination(part, null, network);
-                parsed.Index = index++;
+                var parsed = ParseSendDestination(part, null, network);
                 result.Add(parsed);
             }
             // Check if this is an Ark address (no colon, or ark1 prefix)
@@ -3446,15 +3155,13 @@ public class ArkController(
                     ? amt
                     : null;
 
-                var parsed = ParseSend2Destination(rawDest, amount, network);
-                parsed.Index = index++;
+                var parsed = ParseSendDestination(rawDest, amount, network);
                 result.Add(parsed);
             }
             else
             {
                 // Unknown format, try to parse anyway
-                var parsed = ParseSend2Destination(part, null, network);
-                parsed.Index = index++;
+                var parsed = ParseSendDestination(part, null, network);
                 result.Add(parsed);
             }
         }

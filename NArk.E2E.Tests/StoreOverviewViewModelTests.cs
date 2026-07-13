@@ -15,7 +15,7 @@ public class StoreOverviewViewModelTests
             WalletType = WalletType.HD,
             SignerAvailable = true,
             WalletBackedUp = false,
-            Wallet = "seed"
+            HasSecret = true
         };
 
         Assert.False(model.ShouldWarnWalletBackup);
@@ -35,7 +35,7 @@ public class StoreOverviewViewModelTests
             WalletType = WalletType.HD,
             SignerAvailable = true,
             WalletBackedUp = false,
-            Wallet = "seed",
+            HasSecret = true,
             RecentPayments =
             [
                 new RecentPaymentViewModel

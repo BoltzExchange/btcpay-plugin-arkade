@@ -559,48 +559,6 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     }
 
     /// <summary>
-    /// Reads [data-testid='wallet-balance'] from the current overview
-    /// page. The plugin renders available balance as a BTC-denominated
-    /// string (DisplayFormatter.Currency); the first decimal in the text
-    /// is parsed and ×1e8 to sats.
-    /// </summary>
-    protected async Task<long> ReadAvailableBalanceSatsAsync()
-    {
-        ArgumentNullException.ThrowIfNull(Page);
-        var locator = Page.Locator("[data-testid='wallet-balance']").First;
-        if (await locator.CountAsync() == 0) return 0;
-        var text = await locator.InnerTextAsync();
-        var match = System.Text.RegularExpressions.Regex.Match(text, @"\d+(?:[.,]\d+)?");
-        if (!match.Success) return 0;
-        if (!decimal.TryParse(
-                match.Value.Replace(",", "."),
-                System.Globalization.NumberStyles.Any,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var btc)) return 0;
-        return (long)(btc * 100_000_000m);
-    }
-
-    /// <summary>
-    /// Polls the overview balance until it reaches <paramref name="minSats"/>
-    /// or the timeout elapses. Returns the last observed balance on success.
-    /// </summary>
-    protected async Task<long> PollForBalanceAsync(
-        string storeId, long minSats, TimeSpan? timeout = null)
-    {
-        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromMinutes(3));
-        long last = 0;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-            last = await ReadAvailableBalanceSatsAsync();
-            if (last >= minSats) return last;
-            await Task.Delay(3_000);
-        }
-        throw new TimeoutException(
-            $"Wallet {storeId} balance never reached {minSats} sats (last: {last}).");
-    }
-
-    /// <summary>
     /// Reloads a plugin page until a selector is rendered and visible.
     /// Use this for UI states driven by async wallet/indexer work where a
     /// balance threshold would couple the test to unrelated fee mechanics.

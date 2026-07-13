@@ -15,11 +15,13 @@ public class ArkSendRequest
     /// <summary>
     /// Amount in satoshis. Null means "send all available".
     /// </summary>
+    [Range(1, long.MaxValue)]
     public long? AmountSats { get; set; }
 
     /// <summary>
     /// Specific VTXO outpoints to use as inputs. If empty, coins are selected automatically.
     /// </summary>
+    [MaxLength(500)]
     public List<string>? InputOutpoints { get; set; }
 }
 

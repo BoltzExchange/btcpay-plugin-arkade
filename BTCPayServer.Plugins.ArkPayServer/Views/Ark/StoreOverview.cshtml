@@ -95,7 +95,7 @@
                         Rescan wallet
                     </button>
                 </form>
-                @if (Model.SignerAvailable && !string.IsNullOrEmpty(Model.Wallet) && Model.WalletType == WalletType.HD)
+                @if (Model.SignerAvailable && Model.HasSecret && Model.WalletType == WalletType.HD)
                 {
                     <form method="post" asp-controller="Ark" asp-action="ShowPrivateKey" asp-route-storeId="@storeId">
                         <button type="submit" class="dropdown-item" data-testid="show-private-key-btn">
@@ -383,7 +383,7 @@
                         <li>Lightning payments will be disabled if they are currently enabled.</li>
                         <li>Funds are not deleted from the network.</li>
                     </ul>
-                    @if (Model.SignerAvailable && !string.IsNullOrEmpty(Model.Wallet))
+                    @if (Model.SignerAvailable && Model.HasSecret)
                     {
                         <div class="alert alert-info">
                             Back up the wallet before clearing these settings.

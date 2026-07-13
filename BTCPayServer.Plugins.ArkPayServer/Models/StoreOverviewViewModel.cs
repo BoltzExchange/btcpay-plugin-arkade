@@ -12,7 +12,7 @@ public class StoreOverviewViewModel
     public ArkBalancesViewModel? Balances { get; set; }
     public string? WalletId { get; set; }
     public bool SignerAvailable { get; set; }
-    public string? Wallet { get; set; }
+    public bool HasSecret { get; set; }
     public bool AllowSubDustAmounts { get; set; }
     public bool WalletBackedUp { get; set; }
     public bool HasCurrentWalletFunds { get; set; }
@@ -27,7 +27,7 @@ public class StoreOverviewViewModel
         SignerAvailable &&
         !WalletBackedUp &&
         HasCurrentWalletFunds &&
-        !string.IsNullOrEmpty(Wallet);
+        HasSecret;
 
     public string? ArkOperatorUrl { get; set; }
     public bool ArkOperatorConnected { get; set; }

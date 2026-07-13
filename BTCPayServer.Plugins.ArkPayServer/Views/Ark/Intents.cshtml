@@ -58,7 +58,7 @@
             }
             else
             {
-                <span text-translate="true">All States</span>
+                <span text-translate="true">All Status</span>
             }
         </button>
         <div class="dropdown-menu" aria-labelledby="StateOptionsToggle">
@@ -215,7 +215,7 @@
                                         .Where(v => v != null)
                                         .ToList();
                                 }
-                                <partial name="_VtxoTable" model="vtxoList" view-data='new ViewDataDictionary(ViewData) { { "ShowLinks", true }, { "UseTimeAgo", true }, { "TimeColumnLabel", "Linked" } }' />
+                                <partial name="_VtxoTable" model="vtxoList" view-data='new ViewDataDictionary(ViewData) { { "ShowLinks", true } }' />
                             </td>
                         </tr>
                     }

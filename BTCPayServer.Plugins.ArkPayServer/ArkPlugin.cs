@@ -373,7 +373,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         // Start with preset for the network
         var preset = GetNetworkPreset(networkType);
-        // if (preset is null) return null;
 
         // Check for config file override
         var dataDir = new DataDirectories().Configure(configuration).DataDir;
