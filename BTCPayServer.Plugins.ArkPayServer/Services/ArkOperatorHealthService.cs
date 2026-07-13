@@ -82,9 +82,6 @@ public sealed class ArkOperatorHealthService(IHttpClientFactory httpClientFactor
             Store(new ArkOperatorStatus(false, ArkOperatorAvailability.UnavailableMessage));
     }
 
-    /// <summary>Records a successful operator interaction, clearing any cached "unavailable" state.</summary>
-    public void ReportSuccess() => Store(new ArkOperatorStatus(true, null));
-
     private bool TryGetFresh(out ArkOperatorStatus status)
     {
         var cached = _cached;

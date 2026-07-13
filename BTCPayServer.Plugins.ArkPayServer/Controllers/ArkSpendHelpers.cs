@@ -1,6 +1,7 @@
 using System.Globalization;
 using BTCPayServer;
 using BTCPayServer.Lightning;
+using BTCPayServer.Plugins.ArkPayServer.Helpers;
 using BTCPayServer.Plugins.ArkPayServer.Models;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api;
 using NArk.Abstractions;
@@ -207,7 +208,7 @@ internal static class ArkSpendHelpers
         // Bare Ark address
         if (ArkAddress.TryParse(rawDestination, out var arkAddress) && arkAddress is not null)
         {
-            result.Type = Send2DestinationType.ArkAddress;
+            result.Type = SendDestinationType.ArkAddress;
             result.ResolvedAddress = rawDestination;
             result.AmountSats = amountSats;
             result.IsValid = true;
@@ -224,10 +225,9 @@ internal static class ArkSpendHelpers
                 ? rawDestination[10..]
                 : rawDestination;
 
-            try
+            if (Bolt11Helper.TryParse(invoiceStr, network) is { } invoice)
             {
-                var invoice = BOLT11PaymentRequest.Parse(invoiceStr, network);
-                result.Type = Send2DestinationType.LightningInvoice;
+                result.Type = SendDestinationType.LightningInvoice;
                 result.ResolvedAddress = invoiceStr;
                 result.AmountSats = amountSats > 0
                     ? amountSats
@@ -237,11 +237,9 @@ internal static class ArkSpendHelpers
                     result.Error = "Invoice amount could not be determined";
                 return result;
             }
-            catch
-            {
-                result.Error = "Invalid Lightning invoice";
-                return result;
-            }
+
+            result.Error = "Invalid Lightning invoice";
+            return result;
         }
 
         // BIP21
@@ -260,7 +258,7 @@ internal static class ArkSpendHelpers
 
             if (qs["ark"] is { } arkQs && ArkAddress.TryParse(arkQs, out var qsArkAddress) && qsArkAddress is not null)
             {
-                result.Type = Send2DestinationType.Bip21Ark;
+                result.Type = SendDestinationType.Bip21Ark;
                 result.ResolvedAddress = arkQs;
                 result.AmountSats = amountSats;
                 result.IsValid = true;
@@ -269,30 +267,23 @@ internal static class ArkSpendHelpers
                 return result;
             }
 
-            if (qs["lightning"] is { } lnQs)
+            // An unparseable lightning parameter falls through to the host-as-ark tests.
+            if (qs["lightning"] is { } lnQs && Bolt11Helper.TryParse(lnQs, network) is { } invoice)
             {
-                try
-                {
-                    var invoice = BOLT11PaymentRequest.Parse(lnQs, network);
-                    result.Type = Send2DestinationType.Bip21Lightning;
-                    result.ResolvedAddress = lnQs;
-                    result.AmountSats = amountSats > 0
-                        ? amountSats
-                        : (long)(invoice.MinimumAmount?.ToUnit(LightMoneyUnit.Satoshi) ?? 0);
-                    result.IsValid = result.AmountSats > 0;
-                    if (!result.IsValid)
-                        result.Error = "Invoice amount could not be determined";
-                    return result;
-                }
-                catch
-                {
-                    // Fall through to host-as-ark tests
-                }
+                result.Type = SendDestinationType.Bip21Lightning;
+                result.ResolvedAddress = lnQs;
+                result.AmountSats = amountSats > 0
+                    ? amountSats
+                    : (long)(invoice.MinimumAmount?.ToUnit(LightMoneyUnit.Satoshi) ?? 0);
+                result.IsValid = result.AmountSats > 0;
+                if (!result.IsValid)
+                    result.Error = "Invoice amount could not be determined";
+                return result;
             }
 
             if (ArkAddress.TryParse(host, out var hostArkAddress) && hostArkAddress is not null)
             {
-                result.Type = Send2DestinationType.Bip21Ark;
+                result.Type = SendDestinationType.Bip21Ark;
                 result.ResolvedAddress = host;
                 result.AmountSats = amountSats;
                 result.IsValid = true;
@@ -302,7 +293,7 @@ internal static class ArkSpendHelpers
             }
 
             result.Error =
-                "BIP21 URI does not contain an Arkade address or Lightning invoice. Send2 only supports offchain transfers.";
+                "BIP21 URI does not contain an Arkade address or Lightning invoice. Only offchain transfers are supported.";
             return result;
         }
 
@@ -310,7 +301,7 @@ internal static class ArkSpendHelpers
         if (rawDestination.StartsWith("lnurl", StringComparison.OrdinalIgnoreCase) ||
             rawDestination.IsValidEmail())
         {
-            result.Type = Send2DestinationType.Lnurl;
+            result.Type = SendDestinationType.Lnurl;
             result.Error = "LNURL/Lightning Address requires async resolution";
             return result;
         }
@@ -328,7 +319,7 @@ internal static class ArkSpendHelpers
 internal sealed class ParsedSendDestination
 {
     public string RawDestination { get; set; } = string.Empty;
-    public Send2DestinationType Type { get; set; }
+    public SendDestinationType Type { get; set; }
     public string? ResolvedAddress { get; set; }
     public long AmountSats { get; set; }
     public string? PayoutId { get; set; }

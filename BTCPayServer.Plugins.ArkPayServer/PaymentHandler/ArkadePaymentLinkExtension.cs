@@ -1,23 +1,21 @@
 using BTCPayServer.Payments;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
-using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 
 public class ArkadePaymentLinkExtension : IPaymentLinkExtension
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly ArkadeLightningLimitsService _limitsService;
+    private readonly ArkadePaymentMethodHandler _handler;
 
     public ArkadePaymentLinkExtension(
         IServiceProvider serviceProvider,
-        ArkadeLightningLimitsService limitsService)
+        ArkadePaymentMethodHandler handler)
     {
         _serviceProvider = serviceProvider;
-        _limitsService = limitsService;
+        _handler = handler;
     }
     public PaymentMethodId PaymentMethodId { get; } = ArkadePlugin.ArkadePaymentMethodId;
 
@@ -54,9 +52,10 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
                     builder.WithExtraQuery(upstream![(qIdx + 1)..]);
             }
         }
-        
-        // Add lightning invoice if available and within Boltz limits (prefer LN over LNURL)
-        if (ShouldIncludeLightning(prompt).Result)
+
+        // Add lightning invoice if available and within Boltz limits (prefer LN over LNURL).
+        // The limits decision was made asynchronously when the prompt was configured.
+        if (ShouldIncludeLightning(prompt))
         {
             if (ln is not null)
             {
@@ -71,20 +70,15 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
                 }
             }
         }
-        
+
         return builder.Build();
     }
 
-    private async Task<bool> ShouldIncludeLightning(PaymentPrompt prompt)
+    private bool ShouldIncludeLightning(PaymentPrompt prompt)
     {
-        // Get the invoice amount in satoshis
-        var amountSats = (long)Money.Coins(prompt.Calculate().Due).Satoshi;
+        if (prompt.Details is null)
+            return true;
 
-        // Use the centralized limits service to determine if Lightning should be included
-        // This handles caching of store configuration and Boltz limits validation
-        return await _limitsService.CanSupportLightningAsync(
-            prompt.ParentEntity.StoreId, 
-            amountSats, 
-            CancellationToken.None);
+        return _handler.ParsePaymentPromptDetails(prompt.Details)?.IncludeLightningInPaymentLink ?? true;
     }
 }

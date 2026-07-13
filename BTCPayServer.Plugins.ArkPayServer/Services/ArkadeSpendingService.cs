@@ -3,6 +3,7 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Exceptions;
+using BTCPayServer.Plugins.ArkPayServer.Helpers;
 using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
@@ -89,13 +90,8 @@ public class ArkadeSpendingService(
 
         // Lightning destinations: BOLT11 invoice (optionally lightning: prefixed)
         if (destination.Replace("lightning:", "", StringComparison.InvariantCultureIgnoreCase) is { } lnbolt11 &&
-            BOLT11PaymentRequest.TryParse(lnbolt11, out var bolt11, terms.Network))
+            Bolt11Helper.TryParse(lnbolt11, terms.Network) is { } bolt11)
         {
-            if (bolt11 is null)
-            {
-                throw new MalformedPaymentDestination();
-            }
-
             if (amountSats.HasValue)
                 throw new MalformedPaymentDestination(
                     "amountSats is not supported for Lightning destinations: amount is determined by the BOLT11 invoice.");

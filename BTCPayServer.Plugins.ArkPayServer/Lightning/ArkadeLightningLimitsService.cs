@@ -82,24 +82,24 @@ public class ArkadeLightningLimitsService : IDisposable
             return true;
         
         // Check cache first to see if store uses Arkade Lightning
-        var isArkade = _memoryCache.GetOrCreate<bool?>(GetStoreCacheKey(storeId), entry =>
+        var isArkade = await _memoryCache.GetOrCreateAsync<bool?>(GetStoreCacheKey(storeId), async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = CacheExpiry;
-            
+
             // Need to fetch store to check configuration
-            var store = _storeRepository.FindStore(storeId).GetAwaiter().GetResult();
+            var store = await _storeRepository.FindStore(storeId);
             if (store == null)
                 return null;
-            
+
             // Check if store has Arkade Lightning configured
             var lnPaymentMethodId = PaymentTypes.LN.GetPaymentMethodId("BTC");
             var lnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
                 lnPaymentMethodId,
                 _paymentMethodHandlerDictionary);
-            
+
             return lnConfig?.ConnectionString?.StartsWith("type=arkade", StringComparison.InvariantCultureIgnoreCase) is true;
         });
-        
+
         // If store doesn't use Arkade Lightning, always allow Lightning
         if (isArkade != true)
         {

@@ -15,7 +15,7 @@
 <input asp-for="LightningNodeType" value="LightningNodeType-Arkade" type="radio" id="LightningNodeType-Arkade" data-bs-toggle="pill"
        data-bs-target="#CustomSetup" role="tab" aria-controls="ArkadeSetup"
        aria-selected="@(isSelected ? "true" : "false")"
-       onclick="location.href='@url'"
+       onclick="arkadeEnableLightning()"
        class="@(Model.LightningNodeType == LightningNodeType.Custom ? "active" : "")">
 <label asp-for="LightningNodeType" for="@($"LightningNodeType-Arkade")" text-translate="true">Use Arkade</label>
 
@@ -24,7 +24,25 @@
        <script>
     const triggerEl = document.getElementById('LightningNodeType-Arkade')
 
-    
+    // EnableLightning is a state-changing action and only accepts POST, so build a
+    // standalone form (the radio sits inside the page's own form) and reuse the
+    // page's antiforgery token.
+    function arkadeEnableLightning() {
+        const form = document.createElement('form')
+        form.method = 'post'
+        form.action = '@url'
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')
+        if (token) {
+            const input = document.createElement('input')
+            input.type = 'hidden'
+            input.name = '__RequestVerificationToken'
+            input.value = token.value
+            form.appendChild(input)
+        }
+        document.body.appendChild(form)
+        form.submit()
+    }
+
     if (@isSelected) {
         
         // deactivate currently active tab and activate this tab

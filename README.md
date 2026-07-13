@@ -100,7 +100,6 @@ The setup script will:
 3. Create or import your wallet:
    - Generate a new hot wallet
    - Paste a BIP-39 mnemonic (12 or 24 words)
-   - Paste a watch-only Taproot account descriptor
 
 ### 2. Configure Payment Methods
 
@@ -117,32 +116,13 @@ The setup script will:
 
 ---
 
-## Wallet Types
+## Wallet
 
 ### HD Wallet (BIP-39 Mnemonic)
 - Full hierarchical deterministic key derivation
 - Unique address per invoice (BIP-44 style)
 - Supports boarding addresses (requires HD derivation)
 - Recommended for merchants
-
-### Watch-Only Wallet (Account Descriptor)
-- No signing material stored on the server — the merchant pastes a
-  Taproot account descriptor (e.g. `tr([fingerprint/86'/0'/0']xpub.../0/*)`)
-  and the plugin observes the wallet by deriving addresses and watching VTXOs.
-- Read-only operations work out of the box: receive, balance display,
-  invoice payment detection, contract listing.
-- **Signing-dependent operations** (batch participation, unilateral
-  exits, payouts) require a remote signer. Install the companion
-  `BTCPayServer.Plugins.App` plugin and pair a BTCPayApp device — the
-  device holds the private key and signs over a SignalR bridge. Without
-  a paired device the wallet is still useful for monitoring; signing
-  calls fail with a descriptive `"install the App companion plugin"`
-  error scoped to the operation, not to startup.
-- Setup: in the initial-setup wizard, pick **Pair a watch-only wallet**
-  under *I have a wallet* and paste the descriptor. Example:
-  ```
-  tr([abcd1234/86'/0'/0']xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAu3fDVmz/0/*)
-  ```
 
 ---
 
@@ -155,7 +135,7 @@ The setup script will:
 - Sub-dust toggle for micro-payments
 
 ### Wallet Management
-- Create a new hot wallet or import via mnemonic/account descriptor
+- Create a new hot wallet or import via BIP-39 mnemonic
 - View balance in BTC with show/hide privacy toggle
 - Clear wallet configuration without losing on-chain funds
 - Contract sync on import

@@ -68,10 +68,6 @@
             gap: 1rem;
             align-items: center;
         }
-        .spend-type-badge {
-            font-size: 0.75rem;
-            padding: 0.25rem 0.5rem;
-        }
         .destination-type-badge:empty {
             display: none;
         }
@@ -137,7 +133,6 @@ else
                     <vc:icon symbol="caret-down" css-class="section-icon" />
                     <strong text-translate="true">Destination</strong>
                 </div>
-                <span class="section-summary" id="destination-summary"></span>
             </div>
             <div class="wizard-section-body">
                 <div id="outputs-container">
@@ -386,8 +381,6 @@ else
         // State
         const state = {
             coinSelectionMode: '@Model.CoinSelectionMode',
-            detectedSpendType: null,
-            estimatedFee: null,
             isLightning: false,
             hasBitcoinAddress: false,
             filledDestCount: 0,
@@ -733,7 +726,6 @@ else
                     sendBtn.disabled = true;
                     updateReviewContent(data.error);
                 } else {
-                    state.estimatedFee = data.estimatedFeeSats;
                     sendBtn.disabled = false;
 
                     // A Bitcoin destination in Arkade mode settles via a chain swap only when the
@@ -1062,7 +1054,6 @@ else
                         cb.checked = suggested.has(cb.value);
                     });
 
-                    state.detectedSpendType = data.spendType;
                     updateCoinsSummary();
                     estimateFees();
                 }

@@ -19,6 +19,7 @@ using LNURL;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using NArk.Abstractions;
 using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.Contracts;
@@ -68,6 +69,8 @@ public class ArkGreenfieldController(
     IIntentStorage intentStorage,
     BoardingUtxoSyncService boardingUtxoSyncService,
     IHttpClientFactory httpClientFactory,
+    ArkOperatorHealthService arkOperatorHealth,
+    ILogger<ArkGreenfieldController> logger,
     BoltzLimitsValidator? boltzLimitsValidator) : ControllerBase
 {
     private string? CurrentStoreId => HttpContext.GetStoreData()?.Id;
@@ -160,7 +163,8 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
-            return this.CreateAPIError("wallet-setup-failed", ex.Message);
+            logger.LogWarning(ex, "Arkade wallet setup failed for store {StoreId}", storeId);
+            return this.CreateAPIError("wallet-setup-failed", DescribeArkError(ex, "Wallet setup failed"));
         }
     }
 
@@ -255,8 +259,9 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
+            logger.LogWarning(ex, "Failed to compute balance for store {StoreId}", storeId);
             return this.CreateAPIError(503, "balance-unavailable",
-                $"Unable to compute balance: {ex.Message}");
+                DescribeArkError(ex, "Unable to compute balance"));
         }
     }
 
@@ -377,7 +382,8 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
-            return this.CreateAPIError("send-failed", ex.Message);
+            logger.LogWarning(ex, "Send failed for store {StoreId}", storeId);
+            return this.CreateAPIError("send-failed", DescribeArkError(ex, "Send failed"));
         }
     }
 
@@ -575,7 +581,8 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
-            return this.CreateAPIError("fee-estimate-failed", ex.Message);
+            logger.LogWarning(ex, "Fee estimation failed for store {StoreId}", storeId);
+            return this.CreateAPIError("fee-estimate-failed", DescribeArkError(ex, "Fee estimation failed"));
         }
     }
 
@@ -646,12 +653,13 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
+            logger.LogWarning(ex, "Destination parsing failed for store {StoreId}", storeId);
             return Ok(new ArkParsedDestinationData
             {
                 RawDestination = request.Destination,
-                Type = Send2DestinationType.Unknown.ToString(),
+                Type = SendDestinationType.Unknown.ToString(),
                 IsValid = false,
-                Error = ex.Message
+                Error = DescribeArkError(ex, "Could not parse destination")
             });
         }
     }
@@ -662,7 +670,7 @@ public class ArkGreenfieldController(
         var result = new ParsedSendDestination
         {
             RawDestination = rawDestination,
-            Type = Send2DestinationType.Lnurl
+            Type = SendDestinationType.Lnurl
         };
 
         try
@@ -719,12 +727,12 @@ public class ArkGreenfieldController(
             PayoutId = parsed.PayoutId,
             IsValid = parsed.IsValid,
             Error = parsed.Error,
-            IsBip21 = parsed.Type is Send2DestinationType.Bip21Ark or Send2DestinationType.Bip21Lightning
+            IsBip21 = parsed.Type is SendDestinationType.Bip21Ark or SendDestinationType.Bip21Lightning
                       || (parsed.RawDestination?.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase) ?? false),
-            IsLightning = parsed.Type is Send2DestinationType.LightningInvoice
-                                       or Send2DestinationType.Bip21Lightning
-                                       or Send2DestinationType.Lnurl,
-            IsLnurl = parsed.Type == Send2DestinationType.Lnurl,
+            IsLightning = parsed.Type is SendDestinationType.LightningInvoice
+                                       or SendDestinationType.Bip21Lightning
+                                       or SendDestinationType.Lnurl,
+            IsLnurl = parsed.Type == SendDestinationType.Lnurl,
             LnurlMinSats = parsed.LnurlMinSats,
             LnurlMaxSats = parsed.LnurlMaxSats
         };
@@ -882,7 +890,8 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
-            return this.CreateAPIError("cancel-failed", $"Failed to cancel intent: {ex.Message}");
+            logger.LogWarning(ex, "Failed to cancel intent for store {StoreId}", storeId);
+            return this.CreateAPIError("cancel-failed", DescribeArkError(ex, "Failed to cancel intent"));
         }
     }
 
@@ -1039,8 +1048,9 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
+            logger.LogWarning(ex, "Failed to fetch Ark operator server info");
             return this.CreateAPIError(503, "operator-unavailable",
-                $"Cannot reach Ark operator: {ex.Message}");
+                DescribeArkError(ex, "Cannot reach Ark operator"));
         }
     }
 
@@ -1076,11 +1086,12 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
+            logger.LogDebug(ex, "Ark operator status check failed");
             status.ArkOperator = new ArkServiceConnectionData
             {
                 Url = arkNetworkConfig.ArkUri,
                 IsConnected = false,
-                Error = ex.Message
+                Error = ArkOperatorAvailability.Describe(ex)
             };
         }
 
@@ -1099,11 +1110,12 @@ public class ArkGreenfieldController(
             }
             catch (Exception ex)
             {
+                logger.LogDebug(ex, "Boltz status check failed");
                 status.Boltz = new ArkServiceConnectionData
                 {
                     Url = arkNetworkConfig.BoltzUri,
                     IsConnected = false,
-                    Error = ex.Message
+                    Error = BoltzHealthService.UnavailableMessage
                 };
             }
         }
@@ -1169,7 +1181,8 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
-            return this.CreateAPIError(503, "boltz-unavailable", $"Cannot reach Boltz: {ex.Message}");
+            logger.LogWarning(ex, "Failed to fetch Boltz limits");
+            return this.CreateAPIError(503, "boltz-unavailable", BoltzHealthService.UnavailableMessage);
         }
     }
 
@@ -1194,7 +1207,8 @@ public class ArkGreenfieldController(
         }
         catch (Exception ex)
         {
-            return this.CreateAPIError("sync-failed", $"Sync failed: {ex.Message}");
+            logger.LogWarning(ex, "Wallet sync failed for store {StoreId}", storeId);
+            return this.CreateAPIError("sync-failed", DescribeArkError(ex, "Sync failed"));
         }
     }
 
@@ -1219,6 +1233,17 @@ public class ArkGreenfieldController(
     private T? GetConfig<T>(PaymentMethodId paymentMethodId, StoreData store) where T : class
     {
         return store.GetPaymentMethodConfig<T>(paymentMethodId, paymentMethodHandlerDictionary);
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="ArkController"/>'s error mapping: operator-unreachable failures
+    /// become the friendly unavailable message (and flip the health banner); other errors
+    /// keep their detail prefixed with <paramref name="context"/>.
+    /// </summary>
+    private string DescribeArkError(Exception ex, string context)
+    {
+        arkOperatorHealth.ReportFailure(ex); // no-op unless ex looks like operator-unreachable
+        return ArkOperatorAvailability.Describe(ex, context);
     }
 
     private bool IsArkadeLightningEnabled()

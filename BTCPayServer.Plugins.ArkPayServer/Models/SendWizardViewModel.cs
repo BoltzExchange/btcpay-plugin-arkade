@@ -12,26 +12,15 @@ public class SendWizardViewModel
     // Store context
     public string StoreId { get; set; } = "";
 
-    // Query param inputs (for pre-loading)
-    public string? VtxoOutpoints { get; set; }
-    public string? Destinations { get; set; }
-    public string? Destination { get; set; }
-
     // Hydrated data
     public List<ArkVtxo> AvailableVtxos { get; set; } = new();
     public List<ArkVtxo> SelectedVtxos { get; set; } = new();
     public List<SendOutputViewModel> Outputs { get; set; } = new();
 
-    // Computed state
-    public SpendType? DetectedSpendType { get; set; }
     public string CoinSelectionMode { get; set; } = "auto";
 
     // Balance summary
     public ArkBalancesViewModel? Balances { get; set; }
-
-    // Fee estimation
-    public long? EstimatedFeeSats { get; set; }
-    public string? FeeDescription { get; set; }
 
     // Validation
     public List<string> Errors { get; set; } = new();
@@ -40,8 +29,6 @@ public class SendWizardViewModel
     public long TotalSelectedSats => SelectedVtxos.Sum(v => (long)v.Amount);
     public decimal TotalSelectedBtc => Money.Satoshis(TotalSelectedSats).ToDecimal(MoneyUnit.BTC);
     public int SelectedCount => SelectedVtxos.Count;
-    public bool HasPreselectedCoins => !string.IsNullOrEmpty(VtxoOutpoints);
-    public bool HasPrefilledDestination => !string.IsNullOrEmpty(Destinations) || !string.IsNullOrEmpty(Destination);
 
     // Total available balance
     public long TotalAvailableSats => AvailableVtxos.Sum(v => (long)v.Amount);
@@ -63,13 +50,6 @@ public class SendOutputViewModel
     public string? ResolvedAddress { get; set; }
     public bool IsReadonly { get; set; }
     public bool IsBip21Parsed { get; set; }
-
-    // Per-output fee breakdown
-    public long FeeSats { get; set; }
-    public string? FeeDescription { get; set; }
-    public bool IsLightning { get; set; }
-    public decimal FeePercentage { get; set; }
-    public long MinerFeeSats { get; set; }
 
     // Payout tracking
     public string? PayoutId { get; set; }

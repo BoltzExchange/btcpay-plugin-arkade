@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Plugins.ArkPayServer.Helpers;
 using Microsoft.Extensions.Logging;
 using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.Contracts;
@@ -90,7 +91,7 @@ public class ArkLightningClient(
 
     public static LightningInvoice Map(ArkSwap swap, ArkContractEntity? contractEntity, Network network)
     {
-        var bolt11 = BOLT11PaymentRequest.Parse(swap.Invoice, network);
+        var bolt11 = Bolt11Helper.Parse(swap.Invoice, network);
 
         // Must never throw: core's LightningListener calls GetInvoice unguarded,
         // so a single unmappable swap would abort the store's whole listener.
@@ -175,7 +176,7 @@ public class ArkLightningClient(
 
     private LightningPayment MapPayment(ArkSwap swap, ArkContractEntity? contractEntity)
     {
-        var bolt11 = BOLT11PaymentRequest.Parse(swap.Invoice, network);
+        var bolt11 = Bolt11Helper.Parse(swap.Invoice, network);
         var status = swap.Status switch
         {
             ArkSwapStatus.Settled => LightningPaymentStatus.Complete,
@@ -306,7 +307,11 @@ public class ArkLightningClient(
                 throw new NotSupportedException("BOLT11 is required");
             }
 
-            var pr = BOLT11PaymentRequest.Parse(bolt11, network);
+            var pr = Bolt11Helper.TryParse(bolt11, network);
+            if (pr is null)
+            {
+                return new PayResponse(PayResult.Error, "Invalid BOLT11 invoice");
+            }
 
             // Validate amount against Boltz limits
             var amountSats = (long)(pr.MinimumAmount?.ToUnit(LightMoneyUnit.Satoshi) ?? 0);

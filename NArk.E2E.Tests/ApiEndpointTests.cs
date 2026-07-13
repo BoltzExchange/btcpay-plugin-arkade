@@ -9,8 +9,7 @@ namespace NArk.E2E.Tests;
 /// <summary>
 /// Covers the plugin's JSON API endpoints (parse-destination,
 /// estimate-fees, suggest-coins, show-private-key, etc.). These don't
-/// involve BTCPay's invoice-creation pipeline and so are unaffected by
-/// the per-store hang seen in ReceiveInvoiceTests.
+/// involve BTCPay's invoice-creation pipeline.
 /// </summary>
 [Collection("Arkade Plugin Tests")]
 public class ApiEndpointTests : PlaywrightBaseTest
@@ -53,7 +52,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
         Assert.True(resp.Ok, $"parse-destination returned {resp.Status}");
         var json = await resp.JsonAsync();
         Assert.NotNull(json);
-        // ParseDestinationResponse.Type is the Send2DestinationType enum
+        // ParseDestinationResponse.Type is the SendDestinationType enum
         // stringified. For a bare Ark address that's "ArkAddress".
         var type = json!.Value.GetProperty("type").GetString();
         Assert.Equal("ArkAddress", type);
