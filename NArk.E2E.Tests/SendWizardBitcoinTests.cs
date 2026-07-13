@@ -43,7 +43,8 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
 
         var bitcoinAddress = await GetNewRegtestBitcoinAddressAsync();
 
-        await GoToUrl($"/plugins/ark/stores/{storeId}/send");
+        var selectedVtxos = Uri.EscapeDataString(string.Join(",", outpoints));
+        await GoToUrl($"/plugins/ark/stores/{storeId}/send?vtxos={selectedVtxos}");
         await Page!.FillAsync(".destination-input", bitcoinAddress);
         // 0.0002 BTC (20k sats) is within the regtest chain-swap limits (GreenfieldBitcoinTests
         // settles this exact amount via chain swap).
@@ -103,7 +104,8 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
         var bitcoinAddress = await GetNewRegtestBitcoinAddressAsync();
         var amountBtc = (belowMinSats / 100_000_000m).ToString("0.00000000", CultureInfo.InvariantCulture);
 
-        await GoToUrl($"/plugins/ark/stores/{storeId}/send");
+        var selectedVtxos = Uri.EscapeDataString(string.Join(",", outpoints));
+        await GoToUrl($"/plugins/ark/stores/{storeId}/send?vtxos={selectedVtxos}");
         await Page!.FillAsync(".destination-input", bitcoinAddress);
         await Page.FillAsync(".amount-input", amountBtc);
 

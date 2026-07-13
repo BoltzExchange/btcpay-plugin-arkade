@@ -2114,7 +2114,7 @@ public class ArkController(
                 return RedirectWithError(nameof(Swaps), $"Swap {swapId} not found.", new { storeId });
 
             var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, HttpContext.RequestAborted);
-            var newStatus = MapBoltzStatus(statusResponse.Status);
+            var newStatus = MapBoltzStatus(statusResponse.Status, swap.Status);
 
             if (swap.Status != newStatus)
             {
@@ -2130,16 +2130,12 @@ public class ArkController(
         }
     }
 
-    private static ArkSwapStatus MapBoltzStatus(string status)
+    // Only genuinely terminal Boltz statuses change the stored status; mid-flight
+    // and unrecognized statuses keep it, so polling a healthy pending swap never
+    // poisons it with Unknown.
+    private static ArkSwapStatus MapBoltzStatus(string status, ArkSwapStatus currentStatus)
     {
-        return status switch
-        {
-            "swap.created" or "invoice.set" => ArkSwapStatus.Pending,
-            "invoice.failedToPay" or "invoice.expired" or "swap.expired" or "transaction.failed" or "transaction.refunded" => ArkSwapStatus.Failed,
-            "transaction.mempool" => ArkSwapStatus.Pending,
-            "transaction.confirmed" or "invoice.settled" or "transaction.claimed" => ArkSwapStatus.Settled,
-            _ => ArkSwapStatus.Unknown
-        };
+        return BoltzSwapStatus.ToArkSwapStatus(status) ?? currentStatus;
     }
 
     private static long? GetSwapFeeSats(ArkSwapEntity swap)
@@ -3181,7 +3177,7 @@ public class ArkController(
                             continue;
 
                         var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, cancellationToken);
-                        var newStatus = MapBoltzStatus(statusResponse.Status);
+                        var newStatus = MapBoltzStatus(statusResponse.Status, swap.Status);
 
                         if (swap.Status != newStatus)
                         {
@@ -3319,7 +3315,7 @@ public class ArkController(
                             continue;
 
                         var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, cancellationToken);
-                        var newStatus = MapBoltzStatus(statusResponse.Status);
+                        var newStatus = MapBoltzStatus(statusResponse.Status, swap.Status);
 
                         if (swap.Status != newStatus)
                         {
