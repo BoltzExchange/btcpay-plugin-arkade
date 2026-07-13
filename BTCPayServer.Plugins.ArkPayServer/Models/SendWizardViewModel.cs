@@ -1,4 +1,5 @@
 using NArk.Abstractions.VTXOs;
+using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
@@ -37,14 +38,14 @@ public class SendWizardViewModel
 
     // Computed properties
     public long TotalSelectedSats => SelectedVtxos.Sum(v => (long)v.Amount);
-    public decimal TotalSelectedBtc => TotalSelectedSats / 100_000_000m;
+    public decimal TotalSelectedBtc => Money.Satoshis(TotalSelectedSats).ToDecimal(MoneyUnit.BTC);
     public int SelectedCount => SelectedVtxos.Count;
     public bool HasPreselectedCoins => !string.IsNullOrEmpty(VtxoOutpoints);
     public bool HasPrefilledDestination => !string.IsNullOrEmpty(Destinations) || !string.IsNullOrEmpty(Destination);
 
     // Total available balance
     public long TotalAvailableSats => AvailableVtxos.Sum(v => (long)v.Amount);
-    public decimal TotalAvailableBtc => TotalAvailableSats / 100_000_000m;
+    public decimal TotalAvailableBtc => Money.Satoshis(TotalAvailableSats).ToDecimal(MoneyUnit.BTC);
     public int InstantCoinsCount => AvailableVtxos.Count(v => !v.Swept);
     public int BatchOnlyCoinsCount => AvailableVtxos.Count(v => v.Swept);
 }
@@ -53,7 +54,7 @@ public class SendOutputViewModel
 {
     public string Destination { get; set; } = "";
     public decimal? AmountBtc { get; set; }
-    public long? AmountSats => AmountBtc.HasValue ? (long)(AmountBtc.Value * 100_000_000) : null;
+    public long? AmountSats => AmountBtc is { } amount ? Money.Coins(amount).Satoshi : null;
     public DestinationType? DetectedType { get; set; }
     public string? Error { get; set; }
 

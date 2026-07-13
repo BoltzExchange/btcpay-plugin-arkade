@@ -1,4 +1,3 @@
-using System.Globalization;
 using BTCPayServer.Data;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
@@ -12,6 +11,7 @@ using NArk.Abstractions;
 using NArk.Abstractions.Contracts;
 using NArk.Core.Services;
 using NArk.Core.Transport;
+using NArk.Swaps.Abstractions;
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Services;
@@ -21,6 +21,7 @@ public class ArkadeSpendingService(
     IClientTransport clientTransport,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
+    ISwapStorage swapStorage,
     ISettlementService settlementService,
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary)
 {
@@ -34,10 +35,10 @@ public class ArkadeSpendingService(
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
-    /// On-chain Ark transaction ID for non-Lightning payments. For Lightning payments returns <c>null</c>
-    /// because the payment hash is not surfaced through the current Lightning client API.
+    /// The Arkade transaction id for direct Arkade sends, or the swap id for sends settled
+    /// through a Lightning submarine swap or an Arkade→BTC chain swap.
     /// </returns>
-    public Task<string?> Spend(StoreData store, string destination, CancellationToken cancellationToken)
+    public Task<SpendResult> Spend(StoreData store, string destination, CancellationToken cancellationToken)
         => Spend(store, destination, amountSats: null, inputOutpoints: null, cancellationToken);
 
     /// <summary>
@@ -61,9 +62,10 @@ public class ArkadeSpendingService(
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
-    /// Ark transaction ID for non-Lightning payments. For Lightning payments returns <c>null</c>.
+    /// The Arkade transaction id for direct Arkade sends, or the swap id for sends settled
+    /// through a Lightning submarine swap or an Arkade→BTC chain swap.
     /// </returns>
-    public async Task<string?> Spend(
+    public async Task<SpendResult> Spend(
         StoreData store,
         string destination,
         long? amountSats,
@@ -121,7 +123,15 @@ public class ArkadeSpendingService(
             }
 
             var resp = await lnClient.Pay(bolt11.ToString(), cancellationToken);
-            return resp.Result == PayResult.Ok ? null : throw new ArkadePaymentFailedException($"Payment failed: {resp?.ErrorDetail}");
+            if (resp.Result != PayResult.Ok)
+                throw new ArkadePaymentFailedException($"Payment failed: {resp.ErrorDetail}");
+
+            var swap = (await swapStorage.GetSwaps(
+                    walletIds: [config.WalletId!],
+                    invoices: [bolt11.ToString()],
+                    cancellationToken: cancellationToken))
+                .MaxBy(s => s.CreatedAt);
+            return new SpendResult(TxId: null, SwapId: swap?.SwapId);
         }
 
         var (btcAddress, settlementAmount) = TryResolveBitcoinSettlementDestination(destination, terms.Network);
@@ -140,12 +150,12 @@ public class ArkadeSpendingService(
             {
                 var result = await settlementService.InitiateTransfer(
                     new SettlementTransferRequest(
-                        config.WalletId,
+                        config.WalletId!,
                         transferAmount.Satoshi,
                         SettlementDestination.Bitcoin(btcAddress.ToString())),
                     cancellationToken);
 
-                return result.TransferId;
+                return new SpendResult(TxId: null, SwapId: result.TransferId);
             }
             catch (MalformedPaymentDestination)
             {
@@ -175,24 +185,24 @@ public class ArkadeSpendingService(
             uint256 txId;
             if (hasExplicitInputs)
             {
-                var selectedCoins = await ResolveCoinsForOutpoints(config.WalletId, inputOutpoints!, cancellationToken);
-                txId = await arkadeSpender.Spend(config.WalletId, selectedCoins, [output], cancellationToken);
+                var selectedCoins = await ResolveCoinsForOutpoints(config.WalletId!, inputOutpoints!, cancellationToken);
+                txId = await arkadeSpender.Spend(config.WalletId!, selectedCoins, [output], cancellationToken);
             }
             else
             {
-                txId = await arkadeSpender.Spend(config.WalletId, [output], cancellationToken);
+                txId = await arkadeSpender.Spend(config.WalletId!, [output], cancellationToken);
             }
 
             // Poll for VTXO updates on active contracts — constrain to the last few
             // minutes so wallets with large historical VTXO counts don't re-fetch everything.
             var activeContracts = await contractStorage.GetContracts(
-                walletIds: [config.WalletId], isActive: true, cancellationToken: cancellationToken);
+                walletIds: [config.WalletId!], isActive: true, cancellationToken: cancellationToken);
             await vtxoSyncService.PollScriptsForVtxos(
                 activeContracts.Select(c => c.Script).ToHashSet(),
                 after: DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5),
                 cancellationToken);
 
-            return txId.ToString();
+            return new SpendResult(TxId: txId.ToString(), SwapId: null);
         }
         catch (MalformedPaymentDestination)
         {
@@ -237,15 +247,7 @@ public class ArkadeSpendingService(
             if (address is null)
                 return (null, null);
 
-            Money? amount = null;
-            if (qs["amount"] is { Length: > 0 } amountStr &&
-                decimal.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var amountBtc) &&
-                amountBtc > 0)
-            {
-                amount = Money.Coins(amountBtc);
-            }
-
-            return (address, amount);
+            return (address, ParseBip21Amount(qs["amount"]));
         }
 
         return (null, null);
@@ -268,18 +270,20 @@ public class ArkadeSpendingService(
             if (address is null)
                 return (null, null);
 
-            Money? amount = null;
-            if (qs["amount"] is { Length: > 0 } amountStr &&
-                decimal.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var amountBtc) &&
-                amountBtc > 0)
-            {
-                amount = Money.Coins(amountBtc);
-            }
-
-            return (address, amount);
+            return (address, ParseBip21Amount(qs["amount"]));
         }
 
         return (CreateBitcoinAddressOrNull(destination, network), null);
+    }
+
+    private static Money? ParseBip21Amount(string? amountStr)
+    {
+        if (string.IsNullOrEmpty(amountStr))
+            return null;
+
+        return Money.TryParse(amountStr, out var amount) && amount > Money.Zero
+            ? amount
+            : throw new MalformedPaymentDestination("BIP21 amount is invalid.");
     }
 
     private static BitcoinAddress? CreateBitcoinAddressOrNull(string value, Network network)
@@ -350,3 +354,10 @@ public class ArkadeSpendingService(
     }
 
 }
+
+/// <summary>
+/// Result of an Arkade send. Exactly one of <see cref="TxId"/> and <see cref="SwapId"/> is set:
+/// <see cref="TxId"/> for direct Arkade sends, <see cref="SwapId"/> for sends settled through a
+/// Lightning submarine swap or an Arkade→BTC chain swap.
+/// </summary>
+public record SpendResult(string? TxId, string? SwapId);

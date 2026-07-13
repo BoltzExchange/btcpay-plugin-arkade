@@ -1,3 +1,5 @@
+using NBitcoin;
+
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
 /// <summary>
@@ -18,7 +20,7 @@ public class SpendOutputViewModel
     /// <summary>
     /// Amount in satoshis (computed from AmountBtc).
     /// </summary>
-    public long? AmountSats => AmountBtc.HasValue ? (long)(AmountBtc.Value * 100_000_000m) : null;
+    public long? AmountSats => AmountBtc is { } amount ? Money.Coins(amount).Satoshi : null;
 
     /// <summary>
     /// Output type: Vtxo (offchain) or Onchain.

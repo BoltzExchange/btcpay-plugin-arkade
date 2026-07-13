@@ -63,7 +63,11 @@ internal static class ArkSpendHelpers
         {
             var host = uri.AbsoluteUri[(uri.Scheme.Length + 1)..].Split('?')[0];
             var qs = uri.ParseQueryString();
-            var amount = TryParseBip21Amount(qs["amount"]);
+
+            // An amount parameter that is present but malformed or out of range invalidates the
+            // whole destination: ignoring it would silently turn the send into a send-all.
+            if (!TryParseBip21Amount(qs["amount"], out var amount))
+                return (null, null, ArkTxOutType.Vtxo);
 
             // Check for ark parameter in query string -> VTXO output
             if (qs["ark"] is { } arkQs && ArkAddress.TryParse(arkQs, out var qsArkAddress) && qsArkAddress is not null)
@@ -150,13 +154,42 @@ internal static class ArkSpendHelpers
     /// </summary>
     public static string FormatOutpoint(ArkCoin coin) => $"{coin.Outpoint.Hash}:{coin.Outpoint.N}";
 
-    private static Money? TryParseBip21Amount(string? amountStr)
+    /// <summary>
+    /// Resolve <c>txid:vout</c> outpoint strings against the wallet's available coin set,
+    /// skipping blank entries and outpoints that don't match a spendable coin.
+    /// </summary>
+    public static List<ArkCoin> ResolveCoinsForOutpoints(
+        IReadOnlyCollection<ArkCoin> availableCoins,
+        IEnumerable<string> outpoints)
     {
-        if (string.IsNullOrWhiteSpace(amountStr)) return null;
-        return decimal.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var amountDec)
-                && amountDec > 0
-            ? Money.Coins(amountDec)
-            : null;
+        var byOutpoint = availableCoins.ToDictionary(FormatOutpoint);
+        var coins = new List<ArkCoin>();
+        foreach (var raw in outpoints)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (byOutpoint.TryGetValue(raw.Trim(), out var coin))
+                coins.Add(coin);
+        }
+        return coins;
+    }
+
+    /// <summary>
+    /// Parse a BIP21 <c>amount</c> parameter. Returns <c>false</c> when the parameter is present
+    /// but malformed or out of range; an absent parameter yields <c>true</c> with a null amount.
+    /// </summary>
+    private static bool TryParseBip21Amount(string? amountStr, out Money? amount)
+    {
+        amount = null;
+        if (string.IsNullOrWhiteSpace(amountStr))
+            return true;
+
+        if (Money.TryParse(amountStr, out var parsed) && parsed > Money.Zero)
+        {
+            amount = parsed;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -169,7 +202,7 @@ internal static class ArkSpendHelpers
         string rawDestination, decimal? amountBtc, Network network)
     {
         var result = new ParsedSendDestination { RawDestination = rawDestination ?? string.Empty };
-        var amountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
+        var amountSats = amountBtc is { } amount ? Money.Coins(amount).Satoshi : 0L;
 
         // Bare Ark address
         if (ArkAddress.TryParse(rawDestination, out var arkAddress) && arkAddress is not null)
@@ -220,9 +253,9 @@ internal static class ArkSpendHelpers
             result.PayoutId = qs["payout"];
 
             if (amountSats == 0 && qs["amount"] is { } amountStr &&
-                decimal.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var amountDec))
+                Money.TryParse(amountStr, out var parsedAmount) && parsedAmount > Money.Zero)
             {
-                amountSats = (long)(amountDec * 100_000_000m);
+                amountSats = parsedAmount.Satoshi;
             }
 
             if (qs["ark"] is { } arkQs && ArkAddress.TryParse(arkQs, out var qsArkAddress) && qsArkAddress is not null)

@@ -381,6 +381,8 @@ else
     (function() {
         'use strict';
 
+        const SATS_PER_BTC = 100_000_000;
+
         // State
         const state = {
             coinSelectionMode: '@Model.CoinSelectionMode',
@@ -483,14 +485,14 @@ else
                 const row = cb.closest('tr');
                 const amountText = row.cells[2].textContent;
                 const btc = parseFloat(amountText);
-                totalSats += Math.round(btc * 100000000);
+                totalSats += Math.round(btc * SATS_PER_BTC);
             });
 
-            const totalBtc = (totalSats / 100000000).toFixed(8);
+            const totalBtc = (totalSats / SATS_PER_BTC).toFixed(8);
 
             // In auto mode with no selection, show total available balance
             if (state.coinSelectionMode === 'auto' && count === 0) {
-                const totalAvailable = @((Model.TotalAvailableSats / 100_000_000m).ToString("0.00000000", System.Globalization.CultureInfo.InvariantCulture));
+                const totalAvailable = @(Model.TotalAvailableBtc.ToString("0.00000000", System.Globalization.CultureInfo.InvariantCulture));
                 const totalCoins = @Model.AvailableVtxos.Count();
                 coinsSummary.textContent = `${totalCoins} coins · ${totalAvailable} BTC available`;
             } else {
@@ -512,7 +514,7 @@ else
             coinsTable.querySelectorAll('.coin-checkbox:checked').forEach(cb => {
                 const row = cb.closest('tr');
                 const amountText = row.cells[2].textContent;
-                totalSelectedSats += Math.round(parseFloat(amountText) * 100000000);
+                totalSelectedSats += Math.round(parseFloat(amountText) * SATS_PER_BTC);
             });
 
             // Calculate total allocated across all outputs
@@ -521,7 +523,7 @@ else
             outputRows.forEach(row => {
                 const amountInput = row.querySelector('.amount-input');
                 if (amountInput?.value) {
-                    totalAllocated += Math.round(parseFloat(amountInput.value) * 100000000);
+                    totalAllocated += Math.round(parseFloat(amountInput.value) * SATS_PER_BTC);
                 }
             });
 
@@ -539,15 +541,15 @@ else
                 }
 
                 const remaining = totalSelectedSats - totalAllocated;
-                const remainingBtc = (remaining / 100000000).toFixed(8);
+                const remainingBtc = (remaining / SATS_PER_BTC).toFixed(8);
                 hint.classList.remove('d-none');
 
                 if (remaining < 0) {
-                    hint.innerHTML = `<span class="text-danger">Exceeds balance by ${((-remaining) / 100000000).toFixed(8)} BTC</span>`;
+                    hint.innerHTML = `<span class="text-danger">Exceeds balance by ${((-remaining) / SATS_PER_BTC).toFixed(8)} BTC</span>`;
                 } else if (!amountInput?.value) {
-                    hint.textContent = `Available: ${(totalSelectedSats / 100000000).toFixed(8)} BTC`;
+                    hint.textContent = `Available: ${(totalSelectedSats / SATS_PER_BTC).toFixed(8)} BTC`;
                 } else {
-                    hint.textContent = `Remaining: ${(remaining / 100000000).toFixed(8)} BTC`;
+                    hint.textContent = `Remaining: ${(remaining / SATS_PER_BTC).toFixed(8)} BTC`;
                 }
             });
         }
@@ -702,7 +704,7 @@ else
             coinsTable.querySelectorAll('.coin-checkbox:checked').forEach(cb => {
                 const row = cb.closest('tr');
                 const amountText = row.cells[2].textContent;
-                totalInputSats += Math.round(parseFloat(amountText) * 100000000);
+                totalInputSats += Math.round(parseFloat(amountText) * SATS_PER_BTC);
             });
 
             try {
@@ -719,7 +721,7 @@ else
                         spendType: state.userSpendType,
                         outputs: outputs.filter(o => o.destination).map(o => ({
                             destination: o.destination,
-                            amountSats: o.amountBtc ? Math.round(o.amountBtc * 100000000) : null
+                            amountSats: o.amountBtc ? Math.round(o.amountBtc * SATS_PER_BTC) : null
                         }))
                     })
                 });
@@ -765,7 +767,7 @@ else
                             const adjInput = adjRow?.querySelector('.amount-input');
                             if (adjInput && !adjInput.readOnly) {
                                 const netSats = Math.max(0, adj.grossSats - data.estimatedFeeSats);
-                                adjInput.value = (netSats / 100000000).toFixed(8);
+                                adjInput.value = (netSats / SATS_PER_BTC).toFixed(8);
                                 updateRemainingBalance();
                             }
                         }
@@ -839,7 +841,7 @@ else
                 // Re-select coins for Batch mode if switching from Arkade
                 if (!wasAlreadyBatch && state.coinSelectionMode === 'auto') {
                     const outputs = getOutputs();
-                    const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * 100000000) : null);
+                    const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * SATS_PER_BTC) : null);
                     const totalNeeded = amounts.every(a => a !== null) ? amounts.reduce((sum, a) => sum + a, 0) : null;
                     autoSelectCoins(totalNeeded);
                     handleCoinSelectionChange();
@@ -889,7 +891,7 @@ else
                     cb.checked = (badge.dataset.coinType === 'spendable');
                     if (cb.checked) {
                         const amountText = row.cells[2].textContent;
-                        selectedSats += Math.round(parseFloat(amountText) * 100000000);
+                        selectedSats += Math.round(parseFloat(amountText) * SATS_PER_BTC);
                     }
                 });
             } else {
@@ -902,7 +904,7 @@ else
                     if (!badge || !cb) return;
                     const coinType = badge.dataset.coinType;
                     const amountText = row.cells[2].textContent;
-                    const coinSats = Math.round(parseFloat(amountText) * 100000000);
+                    const coinSats = Math.round(parseFloat(amountText) * SATS_PER_BTC);
 
                     if (!amountNeededSats) {
                         // No specific amount — select all coins
@@ -924,7 +926,7 @@ else
                         if (!badge || !cb || cb.checked) continue;
                         if (badge.dataset.coinType === 'spendable') {
                             const amountText = row.cells[2].textContent;
-                            const coinSats = Math.round(parseFloat(amountText) * 100000000);
+                            const coinSats = Math.round(parseFloat(amountText) * SATS_PER_BTC);
                             cb.checked = true;
                             selectedSats += coinSats;
                         }
@@ -1024,7 +1026,7 @@ else
 
             // Calculate total amount needed
             let totalSats = null;
-            const amounts = outputs.map(o => o.amountBtc ? Math.round(o.amountBtc * 100000000) : null);
+            const amounts = outputs.map(o => o.amountBtc ? Math.round(o.amountBtc * SATS_PER_BTC) : null);
             if (amounts.every(a => a !== null)) {
                 totalSats = amounts.reduce((sum, a) => sum + a, 0);
             }
@@ -1321,8 +1323,8 @@ else
                     // Amount is editable — user must choose within range
                     amountInput.readOnly = false;
                     if (data.lnurlMinSats > 0 && data.lnurlMaxSats > 0) {
-                        const minBtc = (data.lnurlMinSats / 100000000).toFixed(8);
-                        const maxBtc = (data.lnurlMaxSats / 100000000).toFixed(8);
+                        const minBtc = (data.lnurlMinSats / SATS_PER_BTC).toFixed(8);
+                        const maxBtc = (data.lnurlMaxSats / SATS_PER_BTC).toFixed(8);
                         amountInput.min = minBtc;
                         amountInput.max = maxBtc;
                         amountInput.placeholder = `${data.lnurlMinSats.toLocaleString()} - ${data.lnurlMaxSats.toLocaleString()} sats`;
@@ -1406,14 +1408,14 @@ else
                 let totalSelectedSats = 0;
                 coinsTable.querySelectorAll('.coin-checkbox:checked').forEach(cb => {
                     const tr = cb.closest('tr');
-                    totalSelectedSats += Math.round(parseFloat(tr.cells[2].textContent) * 100000000);
+                    totalSelectedSats += Math.round(parseFloat(tr.cells[2].textContent) * SATS_PER_BTC);
                 });
 
                 let otherAllocated = 0;
                 outputsContainer.querySelectorAll('.output-row').forEach(r => {
                     const ai = r.querySelector('.amount-input');
                     if (ai && ai !== amountInput && ai.value) {
-                        otherAllocated += Math.round(parseFloat(ai.value) * 100000000);
+                        otherAllocated += Math.round(parseFloat(ai.value) * SATS_PER_BTC);
                     }
                 });
 
@@ -1424,7 +1426,7 @@ else
                     // when it returns, the response handler reads this flag
                     // and revises the value to (gross − estimated fee).
                     state.pendingMaxAdjustment = { index, grossSats: remaining };
-                    amountInput.value = (remaining / 100000000).toFixed(8);
+                    amountInput.value = (remaining / SATS_PER_BTC).toFixed(8);
                     amountInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
@@ -1492,7 +1494,7 @@ else
 
             if (hasDestinations) {
                 // Calculate amount needed for destination-based selection
-                const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * 100000000) : null);
+                const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * SATS_PER_BTC) : null);
                 const totalNeeded = amounts.every(a => a !== null) ? amounts.reduce((sum, a) => sum + a, 0) : null;
                 autoSelectCoins(totalNeeded);
                 handleCoinSelectionChange();
@@ -1513,7 +1515,7 @@ else
                 // Re-select coins based on new spend type if in auto mode
                 if (state.coinSelectionMode === 'auto') {
                     const outputs = getOutputs();
-                    const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * 100000000) : null);
+                    const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * SATS_PER_BTC) : null);
                     const totalNeeded = amounts.every(a => a !== null) ? amounts.reduce((sum, a) => sum + a, 0) : null;
                     autoSelectCoins(totalNeeded);
                 }
@@ -1530,7 +1532,7 @@ else
                 // Re-select coins based on new spend type if in auto mode
                 if (state.coinSelectionMode === 'auto') {
                     const outputs = getOutputs();
-                    const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * 100000000) : null);
+                    const amounts = outputs.filter(o => o.destination).map(o => o.amountBtc ? Math.round(o.amountBtc * SATS_PER_BTC) : null);
                     const totalNeeded = amounts.every(a => a !== null) ? amounts.reduce((sum, a) => sum + a, 0) : null;
                     autoSelectCoins(totalNeeded);
                 }
