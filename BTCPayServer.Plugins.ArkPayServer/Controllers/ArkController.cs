@@ -26,7 +26,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NArk.Abstractions;
@@ -92,7 +91,6 @@ public class ArkController(
     IWalletStorage walletStorage,
     IDbContextFactory<ArkPluginDbContext> dbContextFactory,
     IHttpClientFactory httpClientFactory,
-    IMemoryCache memoryCache,
     BoardingUtxoSyncService boardingUtxoSyncService,
     IWalletLogStore walletLogStore,
     RecoveryStatusTracker recoveryStatusTracker,
@@ -445,19 +443,14 @@ public class ArkController(
                 .Take(5)
                 .ToListAsync(cancellationToken);
 
-            // Fee stat: project only the columns the fee math needs and memoize the
-            // per-swap fee (settled swaps are terminal) so BOLT11 invoices are parsed
-            // at most once per process.
+            // Fee stat: project only the columns the fee math needs.
             var network = networkProvider.BTC.NBitcoinNetwork;
             var settledSwaps = await db.Swaps
                 .Where(s => s.WalletId == config.WalletId! && s.Status == ArkSwapStatus.Settled)
-                .Select(s => new { s.SwapId, s.SwapType, s.ExpectedAmount, s.Invoice, s.MetadataJson })
+                .Select(s => new { s.SwapType, s.ExpectedAmount, s.Invoice, s.MetadataJson })
                 .ToListAsync(cancellationToken);
-            swapFeesSats = settledSwaps.Sum(s => memoryCache.GetOrCreate($"arkade-swap-fee-{s.SwapId}", entry =>
-            {
-                entry.SlidingExpiration = TimeSpan.FromHours(1);
-                return GetSettledSwapFeeSats(s.SwapType, s.ExpectedAmount, s.Invoice, s.MetadataJson, network);
-            }) ?? 0L);
+            swapFeesSats = settledSwaps.Sum(s =>
+                GetSettledSwapFeeSats(s.SwapType, s.ExpectedAmount, s.Invoice, s.MetadataJson, network) ?? 0L);
 
             foreach (var swap in settlementSwaps)
             {
