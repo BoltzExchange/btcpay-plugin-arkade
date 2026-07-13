@@ -34,11 +34,9 @@ public class ArkPayoutProof: IPayoutProof
     [JsonIgnore]
     public string? Link { get; set; }
 
-    public bool DetectedInBackground { get; set; } = false;
-
-    public static ArkPayoutProof FromSpendResult(string? spendResult, bool detectedInBackground = false)
+    public static ArkPayoutProof FromSpendResult(string? spendResult)
     {
-        var proof = new ArkPayoutProof { DetectedInBackground = detectedInBackground };
+        var proof = new ArkPayoutProof();
 
         if (string.IsNullOrWhiteSpace(spendResult))
             return proof;

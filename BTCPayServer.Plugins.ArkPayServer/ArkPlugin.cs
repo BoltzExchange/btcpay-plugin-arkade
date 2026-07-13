@@ -94,6 +94,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton<ArkPayoutHandler>();
         services.AddSingleton<IPayoutHandler>(sp => sp.GetRequiredService<ArkPayoutHandler>());
 
+        services.AddSingleton<ArkPayoutSwapListener>();
+        services.AddHostedService(sp => sp.GetRequiredService<ArkPayoutSwapListener>());
+
         services.AddSingleton<ArkAutomatedPayoutSenderFactory>();
         services.AddSingleton<IPayoutProcessorFactory>(sp => sp.GetRequiredService<ArkAutomatedPayoutSenderFactory>());
 

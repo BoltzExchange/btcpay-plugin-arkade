@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using NArk.Abstractions.Safety;
 using NArk.Swaps.Abstractions;
 using NArk.Swaps.Boltz.Models.Swaps.Chain;
@@ -14,7 +15,8 @@ public class ArkadeChainSwapSettlementService(
     SwapsManagementService swapsManagementService,
     IClientTransport clientTransport,
     ISwapStorage swapStorage,
-    ISafetyService safetyService) : ISettlementService
+    ISafetyService safetyService,
+    ILogger<ArkadeChainSwapSettlementService>? logger = null) : ISettlementService
 {
     public bool Available => true;
     public string? UnavailableReason => null;
@@ -53,9 +55,24 @@ public class ArkadeChainSwapSettlementService(
                 cancellationToken: cancellationToken))
             .FirstOrDefault();
 
-        var boltzResponse = swap?.Get(SwapMetadata.BoltzResponse) is { } raw
-            ? JsonSerializer.Deserialize<ChainResponse>(raw)
-            : null;
+        // The swap is created AND funded at this point — a failure reading the
+        // informational amount metadata must not surface as a failed transfer,
+        // or the caller retries and funds a second swap. Fall back to the
+        // requested amount; the swap id is what matters.
+        ChainResponse? boltzResponse = null;
+        if (swap?.Get(SwapMetadata.BoltzResponse) is { } raw)
+        {
+            try
+            {
+                boltzResponse = JsonSerializer.Deserialize<ChainResponse>(raw);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex,
+                    "Failed to parse Boltz response metadata for settlement swap {SwapId}; reporting requested amount",
+                    swapId);
+            }
+        }
 
         var sourceAmountSats = boltzResponse?.LockupDetails?.Amount ?? request.AmountSats;
         var destinationAmountSats = boltzResponse?.ClaimDetails?.Amount ?? request.AmountSats;
