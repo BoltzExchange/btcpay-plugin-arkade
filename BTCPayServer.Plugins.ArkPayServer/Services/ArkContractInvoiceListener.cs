@@ -36,6 +36,8 @@ public class ArkContractInvoiceListener(
     ILogger<ArkContractInvoiceListener> logger)
     : IHostedService
 {
+    private static readonly TimeSpan ReconciliationInterval = TimeSpan.FromMinutes(2);
+
     private readonly Channel<string> _checkInvoices = Channel.CreateUnbounded<string>();
     private readonly SemaphoreSlim _paymentLock = new(1, 1);
     private CompositeDisposable _leases = new();
@@ -51,6 +53,7 @@ public class ArkContractInvoiceListener(
 
 
         _ = PollAllInvoices(cancellationToken);
+        _ = ReconcilePaymentsLoop(cancellationToken);
     }
 
     private async void OnSwapChanged(object? sender, NArk.Swaps.Models.ArkSwap swap)
@@ -188,7 +191,7 @@ public class ArkContractInvoiceListener(
 
     public async Task ToggleArkadeContract(InvoiceEntity invoice)
     {
-        var activityState = invoice.Status == InvoiceStatus.New
+        var activityState = IsMonitored(invoice)
             ? ContractActivityState.Active
             : ContractActivityState.Inactive;
         var listenedContract = GetListenedArkadeInvoice(invoice);
@@ -210,6 +213,15 @@ public class ArkContractInvoiceListener(
         {
             await contractStorage.UpdateContractActivityState(walletId, c.Script, activityState);
         }
+    }
+
+    // BTCPay keeps watching expired invoices until MonitoringExpiration so a late
+    // payment can still mark them PaidLate; keep polling their contracts until then.
+    private static bool IsMonitored(InvoiceEntity invoice)
+    {
+        if (invoice.Status is InvoiceStatus.New or InvoiceStatus.Processing)
+            return true;
+        return invoice.Status == InvoiceStatus.Expired && invoice.MonitoringExpiration > DateTimeOffset.UtcNow;
     }
 
     private ArkadeListenedContract? GetListenedArkadeInvoice(InvoiceEntity invoice)
@@ -284,5 +296,113 @@ public class ArkContractInvoiceListener(
         }
         
         logger.LogInformation("Exiting poll loop.");
+    }
+
+    private async Task ReconcilePaymentsLoop(CancellationToken cancellation)
+    {
+        try
+        {
+            while (!cancellation.IsCancellationRequested)
+            {
+                try
+                {
+                    await ReconcilePayments(cancellation);
+                }
+                catch when (cancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Error during Arkade payment reconciliation.");
+                }
+
+                await Task.Delay(ReconciliationInterval, cancellation);
+            }
+        }
+        catch when (cancellation.IsCancellationRequested)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Re-derives payments from stored VTXOs instead of relying on VtxosChanged: the
+    /// storage only raises that event when a row is inserted or updated, so a payment
+    /// lost between the VTXO commit and AddPayment (e.g. a crash) is never replayed by
+    /// re-polling. Also deactivates invoice contracts whose invoice left the monitored set.
+    /// </summary>
+    private async Task ReconcilePayments(CancellationToken cancellation)
+    {
+        var invoices = (await invoiceRepository.GetMonitoredInvoices(ArkadePlugin.ArkadePaymentMethodId, cancellation))
+            .ToDictionary(i => i.Id);
+
+        var activeContracts = await contractStorage.GetContracts(isActive: true, cancellationToken: cancellation);
+        foreach (var contract in activeContracts)
+        {
+            if (contract.Metadata?.GetValueOrDefault("Source") is not { } source ||
+                !source.StartsWith("invoice:", StringComparison.Ordinal))
+                continue;
+
+            var invoiceId = source["invoice:".Length..];
+            if (invoices.ContainsKey(invoiceId))
+                continue;
+
+            var invoice = await GetInvoice(invoiceId);
+            if (invoice is not null && IsMonitored(invoice))
+            {
+                invoices.TryAdd(invoiceId, invoice);
+                continue;
+            }
+
+            await contractStorage.UpdateContractActivityState(
+                contract.WalletIdentifier, contract.Script, ContractActivityState.Inactive, cancellation);
+        }
+
+        if (invoices.Count == 0)
+            return;
+
+        var terms = await clientTransport.GetServerInfoAsync(cancellation);
+        var invoicesByScript = new Dictionary<string, InvoiceEntity>();
+        foreach (var invoice in invoices.Values)
+        {
+            try
+            {
+                var contract = GetListenedArkadeInvoice(invoice)?.Details.GetContract(terms.Network);
+                if (contract is not null)
+                    invoicesByScript.TryAdd(contract.GetArkAddress().ScriptPubKey.ToHex(), invoice);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not derive the Arkade contract script for invoice {InvoiceId}", invoice.Id);
+            }
+        }
+
+        if (invoicesByScript.Count == 0)
+            return;
+
+        var vtxos = await vtxoStorage.GetVtxos(
+            scripts: invoicesByScript.Keys.ToArray(),
+            includeSpent: true,
+            cancellationToken: cancellation);
+        foreach (var vtxo in vtxos)
+        {
+            if (!invoicesByScript.TryGetValue(vtxo.Script, out var invoice))
+                continue;
+
+            var outpoint = $"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}";
+            if (invoice.GetPayments(false).Any(p =>
+                    p.Id == outpoint && p.PaymentMethodId == ArkadePlugin.ArkadePaymentMethodId))
+                continue;
+
+            var vtxoEntity = new VtxoEntity
+            {
+                TransactionId = vtxo.TransactionId,
+                TransactionOutputIndex = (int)vtxo.TransactionOutputIndex,
+                Amount = (long)vtxo.Amount,
+                Script = vtxo.Script,
+                SeenAt = vtxo.CreatedAt
+            };
+            await HandlePaymentData(vtxoEntity, invoice, arkadePaymentMethodHandler);
+        }
     }
 }

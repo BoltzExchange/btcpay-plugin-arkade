@@ -92,12 +92,14 @@ public class ArkLightningClient(
     {
         var bolt11 = BOLT11PaymentRequest.Parse(swap.Invoice, network);
 
+        // Must never throw: core's LightningListener calls GetInvoice unguarded,
+        // so a single unmappable swap would abort the store's whole listener.
+        // Unknown is treated as pending, consistent with SwapExtensions.IsPending.
         var lightningStatus = swap.Status switch
         {
             ArkSwapStatus.Settled => LightningInvoiceStatus.Paid,
-            ArkSwapStatus.Failed => LightningInvoiceStatus.Expired,
-            ArkSwapStatus.Pending => LightningInvoiceStatus.Unpaid,
-            _ => throw new NotSupportedException()
+            ArkSwapStatus.Failed or ArkSwapStatus.Refunded => LightningInvoiceStatus.Expired,
+            _ => LightningInvoiceStatus.Unpaid
         };
 
         VHTLCContract? contract = null;
@@ -177,7 +179,7 @@ public class ArkLightningClient(
         var status = swap.Status switch
         {
             ArkSwapStatus.Settled => LightningPaymentStatus.Complete,
-            ArkSwapStatus.Failed => LightningPaymentStatus.Failed,
+            ArkSwapStatus.Failed or ArkSwapStatus.Refunded => LightningPaymentStatus.Failed,
             ArkSwapStatus.Pending => LightningPaymentStatus.Pending,
             _ => LightningPaymentStatus.Unknown
         };
