@@ -41,7 +41,11 @@ public class SwapsTests : PlaywrightBaseTest
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
         var storeId = await CreateStoreWithArkWalletAsync();
-        var walletId = await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 200_000);
+        var walletId = await GetStoreWalletIdAsync(storeId);
+        Assert.False(string.IsNullOrWhiteSpace(walletId));
+
+        var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
+        await PayArkadeInvoiceAsync(client, storeId, 200_000);
 
         // BOLT11 on the nigiri "lnd" node Boltz can route to.
         var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 600);

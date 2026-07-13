@@ -13,6 +13,7 @@ using CliWrap.Buffered;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using NArk.Abstractions.Contracts;
+using NArk.Abstractions.Intents;
 using NArk.Abstractions.Wallets;
 using NArk.Core.Contracts;
 using NArk.Core.Services;
@@ -40,6 +41,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     public Uri? ServerUri { get; private set; }
     public string? CreatedUser { get; private set; }
     public string? Password { get; private set; }
+    private IServiceProvider? Services { get; set; }
 
     private static bool IsRunningInCI =>
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")) ||
@@ -51,6 +53,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     /// <summary>Starts a Chromium browser and opens a page pointed at the running BTCPay.</summary>
     protected async Task InitializePlaywright(ServerTester serverTester)
     {
+        Services = serverTester.PayTester.ServiceProvider;
         Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
 
         var launchOptions = new BrowserTypeLaunchOptions
@@ -619,8 +622,9 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     }
 
     /// <summary>
-    /// Polls /suggest-coins until it returns spendable outpoints (the real
-    /// precondition for spend/payout/estimate), not just a rendered balance.
+    /// Polls /suggest-coins until it returns outpoints that are also free of
+    /// locally active intents (the real precondition for spend/payout/estimate),
+    /// not just a rendered balance.
     /// The Arkade overview shows an inbound note VTXO the instant arkd's
     /// indexer reports it, but it isn't spendable until the redemption batch
     /// settles — waiting on the displayed balance races that gap and yields
@@ -637,7 +641,8 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
             try
             {
                 var outpoints = await SuggestOutpointsAsync(storeId, destinationType, amountSats);
-                if (outpoints.Count > 0) return outpoints;
+                if (outpoints.Count > 0 && await AreOutpointsFreeOfActiveIntents(storeId, outpoints))
+                    return outpoints;
             }
             // Freshly redeemed note VTXOs can be absent or recoverable until
             // the next batch settles.
@@ -651,6 +656,33 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         }
         throw new TimeoutException(
             $"Store {storeId} had no spendable coins within the wait window (last: {lastError ?? "empty selection"}).");
+    }
+
+    private async Task<bool> AreOutpointsFreeOfActiveIntents(string storeId, IReadOnlyCollection<string> outpoints)
+    {
+        if (Services is null)
+            return true;
+
+        var walletId = await GetStoreWalletIdAsync(storeId);
+        if (string.IsNullOrWhiteSpace(walletId))
+            return false;
+
+        // GetLockedVtxoOutpoints currently omits BatchInProgress, although arkd
+        // still rejects those inputs as VTXO_ALREADY_REGISTERED.
+        var intents = await Services.GetRequiredService<IIntentStorage>().GetIntents(
+            walletIds: [walletId],
+            states:
+            [
+                ArkIntentState.WaitingToSubmit,
+                ArkIntentState.WaitingForBatch,
+                ArkIntentState.BatchInProgress
+            ]);
+        var lockedOutpoints = intents
+            .SelectMany(intent => intent.IntentVtxos)
+            .Select(outpoint => $"{outpoint.Hash}:{outpoint.N}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return !outpoints.Any(lockedOutpoints.Contains);
     }
 
     /// <summary>Calls POST /suggest-coins and returns selected outpoints.</summary>
@@ -690,6 +722,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         Try(() => { Page?.CloseAsync().GetAwaiter().GetResult(); Page = null; });
         Try(() => { Browser?.CloseAsync().GetAwaiter().GetResult(); Browser = null; });
         Try(() => { Playwright?.Dispose(); Playwright = null; });
+        Services = null;
         GC.SuppressFinalize(this);
 
         static void Try(Action a)
