@@ -3382,7 +3382,7 @@ public class ArkController(
         }
         catch
         {
-            // Best-effort: background detection will reconcile if marking fails.
+            // Best-effort: on failure the payout stays AwaitingPayment and must be reconciled manually.
         }
     }
 

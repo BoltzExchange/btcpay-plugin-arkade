@@ -130,15 +130,17 @@ public class PayoutTests : PlaywrightBaseTest
         // and the spend only succeeds once that intent settles (~a batch). A settled production
         // balance completes in one tick; the generous window here absorbs the regtest batch wait.
         var settled = await PollPayoutStateAsync(
-            client, storeId, payout.Id, PayoutState.Completed, TimeSpan.FromMinutes(8));
+            client, storeId, payout.Id, [PayoutState.Completed], TimeSpan.FromMinutes(8));
         Assert.Equal(PayoutState.Completed, settled.State);
         Assert.NotNull(settled.PaymentProof);
     }
 
     /// <summary>
     /// An approved bitcoin-destination payout is settled by the automated processor through an
-    /// ARK→BTC chain swap. Because a swap only <i>initiates</i> delivery, the payout must go
-    /// InProgress (carrying the swap id), not Completed, and a chain swap must be recorded.
+    /// ARK→BTC chain swap. Because a swap only <i>initiates</i> delivery, the payout goes
+    /// InProgress (carrying the swap id) and a chain swap must be recorded;
+    /// ArkPayoutSwapListener later completes it once the swap settles, so a fast regtest
+    /// settlement may already show Completed by the time we observe it.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
@@ -179,8 +181,10 @@ public class PayoutTests : PlaywrightBaseTest
         await client.ApprovePayout(storeId, payout.Id, new ApprovePayoutRequest());
 
         var settling = await PollPayoutStateAsync(
-            client, storeId, payout.Id, PayoutState.InProgress, TimeSpan.FromMinutes(3));
-        Assert.Equal(PayoutState.InProgress, settling.State);
+            client, storeId, payout.Id,
+            [PayoutState.InProgress, PayoutState.Completed], TimeSpan.FromMinutes(3));
+        Assert.True(settling.State is PayoutState.InProgress or PayoutState.Completed,
+            $"expected the chain-swap payout to be InProgress (or Completed after settlement), got {settling.State}");
         Assert.NotNull(settling.PaymentProof);
 
         // The processor settles a bitcoin destination via an ARK→BTC chain swap.
@@ -216,14 +220,14 @@ public class PayoutTests : PlaywrightBaseTest
     }
 
     private static async Task<PayoutData> PollPayoutStateAsync(
-        BTCPayServerClient client, string storeId, string payoutId, PayoutState expected, TimeSpan timeout)
+        BTCPayServerClient client, string storeId, string payoutId, PayoutState[] expected, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         PayoutData? latest = null;
         while (DateTimeOffset.UtcNow < deadline)
         {
             latest = await client.GetStorePayout(storeId, payoutId);
-            if (latest.State == expected)
+            if (expected.Contains(latest.State))
                 return latest;
             await Task.Delay(2_000);
         }

@@ -49,6 +49,11 @@ public class MainchainSettlementService(
     private readonly Channel<string> _walletQueue = Channel.CreateUnbounded<string>();
     private readonly ConcurrentDictionary<string, byte> _queuedWallets = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _walletLocks = new();
+    // Settlement address reserved per store, kept until a swap to it is actually
+    // created. Without this every trigger event during a Boltz outage would
+    // force-generate (and burn) a fresh on-chain address, racing towards the
+    // NBXplorer gap limit.
+    private readonly ConcurrentDictionary<string, string> _pendingSettlementAddresses = new();
 
     public StoreSettlementOption Type => StoreSettlementOption.BitcoinMainchain;
 
@@ -302,6 +307,9 @@ public class MainchainSettlementService(
                     SettlementDestination.Bitcoin(settlementAddress)),
                 cancellationToken);
 
+            // The swap now pays to this address; the next settlement needs a fresh one.
+            _pendingSettlementAddresses.TryRemove(trigger.Store.Id, out _);
+
             logger.LogInformation(
                 "Arkade wallet {WalletId} triggered mainchain settlement {TransferId} to store {StoreId} address {Address}; source={SourceAmountSats} sats destination={DestinationAmountSats} sats fees={FeesPaidSats} sats",
                 walletId,
@@ -406,6 +414,12 @@ public class MainchainSettlementService(
 
     private async Task<string?> GetMainchainSettlementAddress(string storeId)
     {
+        // Reuse the address reserved by a previous attempt whose transfer never
+        // happened (e.g. Boltz unreachable); only force-generate once the last
+        // one was consumed by a successful settlement.
+        if (_pendingSettlementAddresses.TryGetValue(storeId, out var pending))
+            return pending;
+
         var walletId = new WalletId(storeId, "BTC");
         var address = await walletReceiveService.GetOrGenerate(
             walletId,
@@ -419,6 +433,7 @@ public class MainchainSettlementService(
             new WalletObjectId(walletId, WalletObjectData.Types.Address, addressText),
             MainchainSettlementAddressLabel);
 
+        _pendingSettlementAddresses[storeId] = addressText;
         return addressText;
     }
 

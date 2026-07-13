@@ -1,6 +1,7 @@
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
+using BTCPayServer.HostedServices;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Payouts;
 using BTCPayServer.Plugins.ArkPayServer.Services;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using NArk.Abstractions.Wallets;
 using NArk.Core.Transport;
 using NBitcoin;
+using MarkPayoutRequest = BTCPayServer.HostedServices.MarkPayoutRequest;
 using PayoutData = BTCPayServer.Data.PayoutData;
 using PayoutProcessorData = BTCPayServer.Data.PayoutProcessorData;
 
@@ -22,6 +24,7 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
     private readonly ArkadeSpendingService _arkSpendingService;
     private readonly PayoutMethodHandlerDictionary _payoutMethodHandlers;
     private readonly BTCPayNetworkJsonSerializerSettings _jsonSerializerSettings;
+    private readonly PullPaymentHostedService _pullPaymentHostedService;
 
     public ArkAutomatedPayoutProcessor(
         IClientTransport clientTransport,
@@ -35,14 +38,16 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
         ArkadeSpendingService arkSpendingService,
         PayoutMethodHandlerDictionary payoutMethodHandlers,
         BTCPayNetworkJsonSerializerSettings jsonSerializerSettings,
+        PullPaymentHostedService pullPaymentHostedService,
         IWalletProvider walletProvider
-    ) 
+    )
         : base(ArkadePlugin.ArkadePaymentMethodId, logger, storeRepository, payoutProcessorSettings, applicationDbContextFactory, paymentHandlers, pluginHookService, eventAggregator)
     {
         _clientTransport = clientTransport;
         _arkSpendingService = arkSpendingService;
         _payoutMethodHandlers = payoutMethodHandlers;
         _jsonSerializerSettings = jsonSerializerSettings;
+        _pullPaymentHostedService = pullPaymentHostedService;
     }
 
     protected override async Task Process(object paymentMethodConfig, List<PayoutData> payouts)
@@ -62,16 +67,19 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
                 {
                     
                     var amount = new Money(payout.Amount.Value, MoneyUnit.BTC);
-            
+
                     if (amount < terms.Dust)
+                    {
                         payout.State = PayoutState.Cancelled;
+                        continue;
+                    }
 
                     if (payout.GetPayoutMethodId() != PayoutMethodId)
                         continue;
 
                     if (payout.Proof is not null)
                         continue;
-            
+
                     var blob = payout.GetBlob(_jsonSerializerSettings);
                     var claim = await payoutHandler.ParseClaimDestination(blob.Destination, CancellationToken.None);
                     var destinationBip21 = await payoutHandler.TryGenerateBip21(payout, claim);
@@ -89,7 +97,19 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
                             var proof = ArkPayoutProof.FromSpendResult(txId);
                             payoutHandler.SetProofBlob(payout, proof);
                             if (proof.ResolvedPayoutState is { } state)
+                            {
                                 payout.State = state;
+                                // The funds just left the wallet. Persist proof + state now instead of
+                                // relying on the base class's batch save after Process returns — a crash
+                                // in between would leave the payout AwaitingPayment with no proof and
+                                // re-pay it on restart.
+                                await _pullPaymentHostedService.MarkPaid(new MarkPayoutRequest
+                                {
+                                    PayoutId = payout.Id,
+                                    State = state,
+                                    Proof = payout.GetProofBlobJson()
+                                });
+                            }
                         }
                         catch (Exception e)
                         {
