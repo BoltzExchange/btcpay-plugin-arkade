@@ -209,6 +209,12 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Data.Migrations
                 column: "WalletId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_WalletContracts_ActivityState",
+                schema: SchemaName,
+                table: "WalletContracts",
+                column: "ActivityState");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_WalletContracts_Scope",
                 schema: SchemaName,
                 table: "WalletContracts",
