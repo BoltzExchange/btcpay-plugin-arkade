@@ -352,8 +352,9 @@ public class ArkadeSpendingService(
 }
 
 /// <summary>
-/// Result of an Arkade send. Exactly one of <see cref="TxId"/> and <see cref="SwapId"/> is set:
-/// <see cref="TxId"/> for direct Arkade sends, <see cref="SwapId"/> for sends settled through a
-/// Lightning submarine swap or an Arkade→BTC chain swap.
+/// Result of an Arkade send. Exactly one of the members is set: <see cref="TxId"/> for direct
+/// Arkade sends, <see cref="SwapId"/> for sends settled through a Lightning submarine swap or an
+/// Arkade→BTC chain swap, and <see cref="IntentTxId"/> for sends committed to a future batch
+/// round via a manual intent.
 /// </summary>
-public record SpendResult(string? TxId, string? SwapId);
+public record SpendResult(string? TxId, string? SwapId, string? IntentTxId = null);

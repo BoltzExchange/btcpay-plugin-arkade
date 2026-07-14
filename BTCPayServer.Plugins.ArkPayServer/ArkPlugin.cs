@@ -93,9 +93,10 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ArkPayoutHandler>();
         services.AddSingleton<IPayoutHandler>(sp => sp.GetRequiredService<ArkPayoutHandler>());
+        services.AddSingleton<ArkPayoutFulfillmentService>();
 
-        services.AddSingleton<ArkPayoutSwapListener>();
-        services.AddHostedService(sp => sp.GetRequiredService<ArkPayoutSwapListener>());
+        services.AddSingleton<ArkPayoutSettlementListener>();
+        services.AddHostedService(sp => sp.GetRequiredService<ArkPayoutSettlementListener>());
 
         services.AddSingleton<ArkAutomatedPayoutSenderFactory>();
         services.AddSingleton<IPayoutProcessorFactory>(sp => sp.GetRequiredService<ArkAutomatedPayoutSenderFactory>());
@@ -212,8 +213,14 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         });
 
         // Intent scheduler
-        services.Configure<SimpleIntentSchedulerOptions>(options =>
-            options.Threshold = TimeSpan.FromDays(1));
+        services.AddOptions<SimpleIntentSchedulerOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+            {
+                var seconds = configuration.GetValue<int?>("ARKINTENTTHRESHOLDSECONDS");
+                options.Threshold = seconds is > 0
+                    ? TimeSpan.FromSeconds(seconds.Value)
+                    : TimeSpan.FromDays(1);
+            });
         services.AddSingleton<IIntentScheduler, SimpleIntentScheduler>();
 
         // Intent-generation cadence override. NArk's IntentGenerationService
