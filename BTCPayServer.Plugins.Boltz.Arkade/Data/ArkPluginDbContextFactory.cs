@@ -6,7 +6,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure;
 
 namespace BTCPayServer.Plugins.Boltz.Arkade.Data;
 
-public class ArkPluginDbContextFactory(IOptions<DatabaseOptions> options) : BaseDbContextFactory<ArkPluginDbContext>(options, "BTCPayServer.Plugins.Ark")
+public class ArkPluginDbContextFactory(IOptions<DatabaseOptions> options) : BaseDbContextFactory<ArkPluginDbContext>(options, "BTCPayServer.Plugins.Boltz.Arkade")
 {
     public override ArkPluginDbContext CreateContext(Action<NpgsqlDbContextOptionsBuilder>? npgsqlOptionsAction = null)
     {
