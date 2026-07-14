@@ -1,6 +1,10 @@
 # Summary
 
-TODO
+Initial public release of **Boltz.Arkade** for BTCPay Server (v0.1.0).
+
+Accept Arkade offchain Bitcoin and Lightning (via Boltz swaps) in BTCPay. Includes chain-swap settlement, batch payout tracking, store activity feed, wallet backup flow, and a Greenfield API under `/api/v1/stores/{storeId}/arkade/*`.
+
+See [CHANGELOG.md](CHANGELOG.md) for details.
 
 # Uploading to BTCPay
 

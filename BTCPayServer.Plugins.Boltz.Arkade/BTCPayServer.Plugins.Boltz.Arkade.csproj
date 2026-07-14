@@ -5,9 +5,9 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
 
-        <Product>Arkade - Beta</Product>
-        <Description>Programmable money for sovereign business. Easily accept payments through Arkade &amp; Lightning non-custodially without complexity.</Description>
-        <Version>2.4.2</Version>
+        <Product>Boltz.Arkade</Product>
+        <Description>Accept Arkade offchain Bitcoin and Lightning payments in BTCPay Server. Published by Boltz Exchange.</Description>
+        <Version>0.1.0</Version>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>

@@ -1,6 +1,6 @@
 # Building the Plugin
 
-How to build and package the Arkade BTCPay plugin from source for development
+How to build and package the Boltz.Arkade BTCPay plugin from source for development
 or manual upload to a BTCPay Server instance.
 
 ## Prerequisites
@@ -65,6 +65,6 @@ make release
 
 This publishes the plugin in Release configuration and packs it with BTCPay's
 `PluginPacker` into `release/BTCPayServer.Plugins.Boltz.Arkade/<version>/`
-(the packer uses the 4-part assembly version, e.g. `2.4.2.0`), including the
+(the packer uses the 4-part assembly version, e.g. `0.1.0.0`), including the
 `.btcpay` file and `SHA256SUMS`. Upload the `.btcpay` file to a BTCPay Server
 via `Plugins` → `Upload Plugin`.
