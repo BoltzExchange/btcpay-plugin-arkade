@@ -688,9 +688,6 @@ public class ArkController(
         return RedirectToAction(nameof(Receive), new { storeId });
     }
 
-    private static (IDestination? Destination, Money? Amount, ArkTxOutType OutputType) ParseOutputDestination(SpendOutputViewModel output, Network network)
-        => ArkSpendHelpers.ParseOutputDestination(output.Destination, network);
-
     [HttpPost("stores/{storeId}/estimate-fees")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> EstimateFees(string storeId, [FromBody] FeeEstimateRequest request, CancellationToken token)
@@ -743,7 +740,7 @@ public class ArkController(
                 // to the Batch fee estimate below instead of erroring — keeping the wizard usable.
                 if (string.Equals(request.SpendType, "Arkade", StringComparison.OrdinalIgnoreCase))
                 {
-                    var parseResult = ParseOutputDestination(new SpendOutputViewModel { Destination = dest }, serverInfo.Network);
+                    var parseResult = ArkSpendHelpers.ParseOutputDestination(dest, serverInfo.Network);
                     if (parseResult.Destination != null && parseResult.OutputType == ArkTxOutType.Onchain)
                     {
                         // Same source as MainchainSettlementService.GetMainchainSettlementLimits
@@ -867,7 +864,7 @@ public class ArkController(
             {
                 if (string.IsNullOrWhiteSpace(outputReq.Destination)) continue;
 
-                var parseResult = ParseOutputDestination(new SpendOutputViewModel { Destination = outputReq.Destination }, serverInfo.Network);
+                var parseResult = ArkSpendHelpers.ParseOutputDestination(outputReq.Destination, serverInfo.Network);
                 if (parseResult.Destination == null) continue;
 
                 var amount = outputReq.AmountSats.HasValue
@@ -1455,8 +1452,7 @@ public class ArkController(
         for (int i = 0; i < validOutputs.Count; i++)
         {
             var output = validOutputs[i];
-            var spendOutput = new SpendOutputViewModel { Destination = output.Destination };
-            var (dest, parsedAmount, outputType) = ParseOutputDestination(spendOutput, serverInfo.Network);
+            var (dest, parsedAmount, outputType) = ArkSpendHelpers.ParseOutputDestination(output.Destination, serverInfo.Network);
 
             if (dest == null)
             {
