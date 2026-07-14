@@ -19,12 +19,15 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Payouts.Ark;
 /// Resolves payouts whose spend only *initiated* a transfer: an Ark->BTC chain swap or a
 /// Lightning submarine swap (proof carries the swap id in
 /// <see cref="ArkPayoutProof.TransferId"/>), or a batch intent (proof carries the intent tx id
-/// in <see cref="ArkPayoutProof.IntentTxId"/>). The send path leaves such payouts InProgress;
-/// this listener watches swap and intent storage and marks the payout Completed once the
-/// transfer settles — for intents with the batch's on-chain commitment txid as final proof —
-/// or reverts it to AwaitingPayment (clearing the proof so it can be retried) when the swap
-/// fails or is refunded, or the intent is cancelled, expires, or its batch fails. A failed or
-/// cancelled intent never left the wallet's VTXOs, so the revert is unconditionally safe.
+/// in <see cref="ArkPayoutProof.IntentTxId"/>). Marks the payout Completed once the transfer
+/// settles — for intents with the batch's on-chain commitment txid as final proof — or reverts
+/// it to AwaitingPayment for retry when the transfer terminally fails (a failed or cancelled
+/// intent never left the wallet's VTXOs, so the revert is unconditionally safe).
+/// <para>
+/// Events are contentless wake-ups: every reconcile pass re-reads each pending payout's
+/// transfer from storage, so ordering doesn't matter — a fast transfer can settle before any
+/// payout carries its id, but whichever write lands second still triggers a covering pass.
+/// </para>
 /// </summary>
 public class ArkPayoutSettlementListener(
     ISwapStorage swapStorage,
@@ -32,44 +35,39 @@ public class ArkPayoutSettlementListener(
     ArkPayoutHandler payoutHandler,
     ApplicationDbContextFactory dbContextFactory,
     PullPaymentHostedService pullPaymentHostedService,
+    EventAggregator eventAggregator,
     ILogger<ArkPayoutSettlementListener> logger) : BackgroundService
 {
     private enum SettlementSource { Swap, Intent }
 
     /// <summary>
-    /// A transfer reaching a terminal state, flattened to what payout resolution needs.
-    /// <see cref="Key"/> is the swap id or intent tx id the payout proof carries;
-    /// <see cref="Settled"/> is false for every terminal failure (swap Failed/Refunded,
-    /// intent Cancelled/BatchFailed); <see cref="OnchainTxId"/> upgrades the proof to a real
-    /// txid when available (batch commitment transaction).
+    /// A transfer's terminal state, flattened to what payout resolution needs.
+    /// <see cref="Settled"/> is false for every terminal failure; <see cref="OnchainTxId"/>
+    /// upgrades the proof to the batch commitment txid when available.
     /// </summary>
     private sealed record SettlementSignal(SettlementSource Source, string Key, bool Settled, string? OnchainTxId);
 
-    private readonly Channel<SettlementSignal> _queue = Channel.CreateUnbounded<SettlementSignal>();
+    /// <summary>
+    /// Single-slot wake-up — only safe while messages carry no data: an event arriving
+    /// mid-pass lands in the emptied slot and is covered by the next pass.
+    /// </summary>
+    private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(
+        new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         swapStorage.SwapsChanged += OnSwapChanged;
         intentStorage.IntentChanged += OnIntentChanged;
+        using var payoutSubscription = eventAggregator.Subscribe<PayoutEvent>(OnPayoutEvent);
 
         try
         {
             await ReconcilePendingPayouts(stoppingToken);
 
-            while (await _queue.Reader.WaitToReadAsync(stoppingToken))
+            while (await _wake.Reader.WaitToReadAsync(stoppingToken))
             {
-                while (_queue.Reader.TryRead(out var signal))
-                {
-                    try
-                    {
-                        await ApplySignal(signal, stoppingToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Failed to update payouts for {Source} {Key}",
-                            signal.Source, signal.Key);
-                    }
-                }
+                _wake.Reader.TryRead(out _);
+                await ReconcilePendingPayouts(stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -85,13 +83,20 @@ public class ArkPayoutSettlementListener(
     private void OnSwapChanged(object? sender, ArkSwap swap)
     {
         if (swap.Status.IsTerminalState())
-            _queue.Writer.TryWrite(ToSignal(swap));
+            _wake.Writer.TryWrite(true);
     }
 
     private void OnIntentChanged(object? sender, ArkIntent intent)
     {
         if (IsTerminal(intent.State))
-            _queue.Writer.TryWrite(ToSignal(intent));
+            _wake.Writer.TryWrite(true);
+    }
+
+    private void OnPayoutEvent(PayoutEvent evt)
+    {
+        if (evt.Payout.State == PayoutState.InProgress &&
+            evt.Payout.PayoutMethodId == payoutHandler.PayoutMethodId.ToString())
+            _wake.Writer.TryWrite(true);
     }
 
     private static SettlementSignal ToSignal(ArkSwap swap) =>
@@ -105,19 +110,15 @@ public class ArkPayoutSettlementListener(
         state is ArkIntentState.BatchSucceeded or ArkIntentState.BatchFailed or ArkIntentState.Cancelled;
 
     /// <summary>
-    /// Catches up payouts whose swap or intent reached a terminal state while the server
-    /// was down and no storage event fired.
+    /// Resolves every InProgress payout whose transfer already reached a terminal state.
+    /// Runs once at startup (catch-up) and again on every wake-up.
     /// </summary>
     private async Task ReconcilePendingPayouts(CancellationToken cancellationToken)
     {
+        List<(PayoutData Payout, ArkPayoutProof Proof)> pending;
         try
         {
-            foreach (var (payout, proof) in await GetInProgressPayouts(cancellationToken))
-            {
-                var signal = await TryResolveSignal(proof, cancellationToken);
-                if (signal is not null)
-                    await ApplySignalToPayout(signal, payout, proof);
-            }
+            pending = await GetInProgressPayouts(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -125,7 +126,26 @@ public class ArkPayoutSettlementListener(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to reconcile in-progress payouts");
+            logger.LogError(ex, "Failed to load in-progress payouts");
+            return;
+        }
+
+        foreach (var (payout, proof) in pending)
+        {
+            try
+            {
+                var signal = await TryResolveSignal(proof, cancellationToken);
+                if (signal is not null)
+                    await ApplySignalToPayout(signal, payout, proof);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to resolve payout {PayoutId}", payout.Id);
+            }
         }
     }
 
@@ -151,22 +171,6 @@ public class ArkPayoutSettlementListener(
 
         return null;
     }
-
-    private async Task ApplySignal(SettlementSignal signal, CancellationToken cancellationToken)
-    {
-        foreach (var (payout, proof) in await GetInProgressPayouts(cancellationToken))
-        {
-            if (Matches(proof, signal))
-                await ApplySignalToPayout(signal, payout, proof);
-        }
-    }
-
-    private static bool Matches(ArkPayoutProof proof, SettlementSignal signal) => signal.Source switch
-    {
-        SettlementSource.Swap => proof.TransferId == signal.Key,
-        SettlementSource.Intent => proof.IntentTxId == signal.Key,
-        _ => false
-    };
 
     private async Task ApplySignalToPayout(SettlementSignal signal, PayoutData payout, ArkPayoutProof proof)
     {
