@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 using NArk.Abstractions.Wallets;
 using NArk.Core.Transport;
 using NBitcoin;
-using MarkPayoutRequest = BTCPayServer.HostedServices.MarkPayoutRequest;
 using PayoutData = BTCPayServer.Data.PayoutData;
 using PayoutProcessorData = BTCPayServer.Data.PayoutProcessorData;
 
@@ -24,7 +23,7 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
     private readonly ArkadeSpendingService _arkSpendingService;
     private readonly PayoutMethodHandlerDictionary _payoutMethodHandlers;
     private readonly BTCPayNetworkJsonSerializerSettings _jsonSerializerSettings;
-    private readonly PullPaymentHostedService _pullPaymentHostedService;
+    private readonly ArkPayoutFulfillmentService _payoutFulfillment;
 
     public ArkAutomatedPayoutProcessor(
         IClientTransport clientTransport,
@@ -38,7 +37,7 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
         ArkadeSpendingService arkSpendingService,
         PayoutMethodHandlerDictionary payoutMethodHandlers,
         BTCPayNetworkJsonSerializerSettings jsonSerializerSettings,
-        PullPaymentHostedService pullPaymentHostedService,
+        ArkPayoutFulfillmentService payoutFulfillment,
         IWalletProvider walletProvider
     )
         : base(ArkadePlugin.ArkadePaymentMethodId, logger, storeRepository, payoutProcessorSettings, applicationDbContextFactory, paymentHandlers, pluginHookService, eventAggregator)
@@ -47,7 +46,7 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
         _arkSpendingService = arkSpendingService;
         _payoutMethodHandlers = payoutMethodHandlers;
         _jsonSerializerSettings = jsonSerializerSettings;
-        _pullPaymentHostedService = pullPaymentHostedService;
+        _payoutFulfillment = payoutFulfillment;
     }
 
     protected override async Task Process(object paymentMethodConfig, List<PayoutData> payouts)
@@ -61,71 +60,58 @@ public class ArkAutomatedPayoutProcessor: BaseAutomatedPayoutProcessor<ArkAutoma
 
         foreach (var payout in payouts)
         {
-            if (payoutHandler.PayoutLocker.LockOrNullAsync(payout.Id, 0) is { } locker && await locker is {} disposable)
+            if (payout.GetPayoutMethodId() != PayoutMethodId)
+                continue;
+
+            if (payout.Proof is not null)
+                continue;
+
+            var amount = new Money(payout.Amount.Value, MoneyUnit.BTC);
+            if (amount < terms.Dust)
             {
-                using (disposable)
-                {
-                    
-                    var amount = new Money(payout.Amount.Value, MoneyUnit.BTC);
-
-                    if (amount < terms.Dust)
-                    {
-                        payout.State = PayoutState.Cancelled;
-                        continue;
-                    }
-
-                    if (payout.GetPayoutMethodId() != PayoutMethodId)
-                        continue;
-
-                    if (payout.Proof is not null)
-                        continue;
-
-                    var blob = payout.GetBlob(_jsonSerializerSettings);
-                    var claim = await payoutHandler.ParseClaimDestination(blob.Destination, CancellationToken.None);
-                    var destinationBip21 = await payoutHandler.TryGenerateBip21(payout, claim);
-
-                    if (destinationBip21 is not null)
-                    {
-                        try
-                        {
-                            var result = await _arkSpendingService.Spend(storeData, destinationBip21, CancellationToken.None);
-
-                            // A bitcoin destination is settled through an Ark->BTC chain swap, whose
-                            // id is only a swap *initiation* — not delivered funds. Complete the payout
-                            // only for a real on-ledger txid; a swap id leaves it InProgress until the
-                            // swap settles, so we never report undelivered funds as paid.
-                            var proof = ArkPayoutProof.FromSpendResult(result);
-                            payoutHandler.SetProofBlob(payout, proof);
-                            if (proof.ResolvedPayoutState is { } state)
-                            {
-                                payout.State = state;
-                                // The funds just left the wallet. Persist proof + state now instead of
-                                // relying on the base class's batch save after Process returns — a crash
-                                // in between would leave the payout AwaitingPayment with no proof and
-                                // re-pay it on restart.
-                                await _pullPaymentHostedService.MarkPaid(new MarkPayoutRequest
-                                {
-                                    PayoutId = payout.Id,
-                                    State = state,
-                                    Proof = payout.GetProofBlobJson()
-                                });
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            Logs.PayServer.LogError(e,
-                                "Automated Arkade payout {PayoutId} to {Destination} failed to settle",
-                                payout.Id, destinationBip21);
-                        }
-
-                    }
-                    else
-                        payout.State = PayoutState.Cancelled;
-                }
+                payout.State = PayoutState.Cancelled;
+                continue;
             }
-            
-        }
-        
 
+            var blob = payout.GetBlob(_jsonSerializerSettings);
+            var claim = await payoutHandler.ParseClaimDestination(blob.Destination, CancellationToken.None);
+            var destinationBip21 = await payoutHandler.TryGenerateBip21(payout, claim);
+
+            if (destinationBip21 is null)
+            {
+                payout.State = PayoutState.Cancelled;
+                continue;
+            }
+
+            try
+            {
+                // A bitcoin destination is settled through an Ark->BTC chain swap, whose
+                // id is only a swap *initiation* — not delivered funds. The fulfillment
+                // service completes the payout only for a real on-ledger txid; a swap id
+                // leaves it InProgress until the swap settles, so we never report
+                // undelivered funds as paid. It persists proof + state immediately — a
+                // crash before the base class's batch save must not re-pay on restart.
+                var result = await _payoutFulfillment.FulfillPayouts(
+                    [payout.Id],
+                    ct => _arkSpendingService.Spend(storeData, destinationBip21, ct),
+                    CancellationToken.None);
+
+                if (!result.Executed)
+                    continue; // Another payment path owns this payout right now.
+
+                // Mirror the persisted outcome onto the tracked entity so the base
+                // class's batch save after Process returns doesn't overwrite it.
+                var outcome = result.Outcomes.Single();
+                payoutHandler.SetProofBlob(payout, outcome.Proof);
+                if (outcome.State is { } state)
+                    payout.State = state;
+            }
+            catch (Exception e)
+            {
+                Logs.PayServer.LogError(e,
+                    "Automated Arkade payout {PayoutId} to {Destination} failed to settle",
+                    payout.Id, destinationBip21);
+            }
+        }
     }
 }

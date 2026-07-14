@@ -62,7 +62,7 @@ public class ArkController(
     BoltzClient? boltzClient,
     ArkNetworkConfig arkNetworkConfig,
     BTCPayNetworkProvider networkProvider,
-    ArkPayoutHandler arkPayoutHandler,
+    ArkPayoutFulfillmentService payoutFulfillment,
     StoreRepository storeRepository,
     PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
     IClientTransport clientTransport,
@@ -74,7 +74,6 @@ public class ArkController(
     ArkAutomatedPayoutSenderFactory payoutSenderFactory,
     PayoutProcessorService payoutProcessorService,
     IEnumerable<ISettlementOption> settlementOptions,
-    PullPaymentHostedService pullPaymentHostedService,
     InvoiceRepository invoiceRepository,
     EventAggregator eventAggregator,
     IIntentGenerationService intentGenerationService,
@@ -1428,13 +1427,16 @@ public class ArkController(
                         .Replace("lightning:", "", StringComparison.OrdinalIgnoreCase);
                 }
 
-                var lnResult = await arkadeSpendingService.Spend(store!, lnDestination, token);
-
                 // A Lightning send settles through a submarine swap, so a payout it fulfills
-                // stays InProgress carrying the swap id until ArkPayoutSwapListener
+                // stays InProgress carrying the swap id until ArkPayoutSettlementListener
                 // completes it once the swap settles.
-                if (!string.IsNullOrEmpty(lnOutput.PayoutId))
-                    await MarkPayoutFromSpendResult(lnOutput.PayoutId, lnResult, token);
+                var lnError = await SpendFulfillingPayouts([lnOutput],
+                    ct => arkadeSpendingService.Spend(store!, lnDestination, ct), token);
+                if (lnError != null)
+                {
+                    model.Errors.Add(lnError);
+                    return View("Send", model);
+                }
 
                 return RedirectWithSuccess(nameof(StoreOverview), "Lightning payment sent!", new { storeId });
             }
@@ -1514,12 +1516,16 @@ public class ArkController(
                 {
                     var btcOutput = validOutputs[0];
                     // Chain swaps run their own coin selection, so the selected VTXOs are not passed as explicit inputs here.
-                    var swapResult = await arkadeSpendingService.Spend(store!, btcOutput.Destination, settlementSats, null, token);
-
-                    // A chain swap only *initiates* the transfer, so the payout stays InProgress
-                    // (carrying the swap id) until it settles; it must not be marked delivered yet.
-                    if (!string.IsNullOrEmpty(btcOutput.PayoutId))
-                        await MarkPayoutFromSpendResult(btcOutput.PayoutId, swapResult, token);
+                    // A chain swap only *initiates* the transfer, so a payout it fulfills stays
+                    // InProgress (carrying the swap id) until it settles; it must not be marked
+                    // delivered yet.
+                    var swapError = await SpendFulfillingPayouts([btcOutput],
+                        ct => arkadeSpendingService.Spend(store!, btcOutput.Destination, settlementSats, null, ct), token);
+                    if (swapError != null)
+                    {
+                        model.Errors.Add(swapError);
+                        return View("Send", model);
+                    }
 
                     return RedirectWithSuccess(nameof(StoreOverview),
                         "Bitcoin settlement initiated via chain swap. Funds arrive once the swap settles.",
@@ -1578,20 +1584,28 @@ public class ArkController(
                     finalOutputs.Add(new ArkTxOut(ArkTxOutType.Vtxo, Money.Satoshis(changeAmount), selfDest));
                 }
 
-                var intentTxId = await intentGenerationService.GenerateManualIntent(
-                    config.WalletId!,
-                    new ArkIntentSpec(
-                        selectedCoins.ToArray(),
-                        finalOutputs.ToArray(),
-                        DateTimeOffset.UtcNow,
-                        DateTimeOffset.UtcNow.AddHours(1)
-                    ),
-                    cancellationToken: token);
+                var intentSpec = new ArkIntentSpec(
+                    selectedCoins.ToArray(),
+                    finalOutputs.ToArray(),
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow.AddHours(1)
+                );
 
-                // Mark payouts as paid if any outputs fulfill payouts (no txId yet — assigned at batch time)
-                foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
+                // A batch intent is only a *commitment* to the next batch round — nothing has
+                // settled yet. Payouts it fulfills stay InProgress carrying the intent tx id;
+                // ArkPayoutSettlementListener completes them when the batch commits, or
+                // reverts them if the intent is cancelled, expires, or its batch fails.
+                string? intentTxId = null;
+                var batchError = await SpendFulfillingPayouts(validOutputs, async ct =>
                 {
-                    await MarkPayoutFromSpendResult(output.PayoutId!, null, token);
+                    intentTxId = await intentGenerationService.GenerateManualIntent(
+                        config.WalletId!, intentSpec, cancellationToken: ct);
+                    return new SpendResult(TxId: null, SwapId: null, IntentTxId: intentTxId);
+                }, token);
+                if (batchError != null)
+                {
+                    model.Errors.Add(batchError);
+                    return View("Send", model);
                 }
 
                 return RedirectWithSuccess(nameof(Intents),
@@ -1600,24 +1614,30 @@ public class ArkController(
             }
             else
             {
-                // Arkade path: instant offchain spend
-                var txId = await arkadeSpender.Spend(
-                    config.WalletId!,
-                    selectedCoins.ToArray(),
-                    arkOutputs.ToArray(),
-                    token);
-
-                // Poll for VTXO updates
-                var activeContracts = await contractStorage.GetContracts(walletIds: [config.WalletId!], isActive: true, cancellationToken: token);
-                await vtxoSyncService.PollScriptsForVtxos(activeContracts.Select(c => c.Script).ToHashSet(), PostOpVtxoPollSince(), token);
-
-                // Mark payouts as paid if any outputs fulfill payouts
-                foreach (var output in validOutputs.Where(o => !string.IsNullOrEmpty(o.PayoutId)))
+                // Arkade path: instant offchain spend. Payouts fulfilled by outputs are
+                // completed immediately with the real txid.
+                uint256? sentTxId = null;
+                var sendError = await SpendFulfillingPayouts(validOutputs, async ct =>
                 {
-                    await MarkPayoutFromSpendResult(output.PayoutId!, new SpendResult(txId.ToString(), null), token);
+                    sentTxId = await arkadeSpender.Spend(
+                        config.WalletId!,
+                        selectedCoins.ToArray(),
+                        arkOutputs.ToArray(),
+                        ct);
+
+                    // Poll for VTXO updates
+                    var activeContracts = await contractStorage.GetContracts(walletIds: [config.WalletId!], isActive: true, cancellationToken: ct);
+                    await vtxoSyncService.PollScriptsForVtxos(activeContracts.Select(c => c.Script).ToHashSet(), PostOpVtxoPollSince(), ct);
+
+                    return new SpendResult(sentTxId.ToString(), null);
+                }, token);
+                if (sendError != null)
+                {
+                    model.Errors.Add(sendError);
+                    return View("Send", model);
                 }
 
-                return RedirectWithSuccess(nameof(StoreOverview), $"Transaction sent successfully! TxId: {txId}", new { storeId });
+                return RedirectWithSuccess(nameof(StoreOverview), $"Transaction sent successfully! TxId: {sentTxId}", new { storeId });
             }
         }
         catch (Exception ex)
@@ -2955,29 +2975,29 @@ public class ArkController(
     #region Send helpers - destination parsing, LNURL resolution, payouts
 
     /// <summary>
-    /// Marks a payout from the result of a spend. A real on-ledger txid completes the payout;
-    /// a swap id (chain or submarine) leaves it InProgress until the swap settles, so undelivered
-    /// funds are never reported as paid. Mirrors <see cref="ArkAutomatedPayoutProcessor"/>'s proof handling.
+    /// Runs a send that may fulfill payouts. When any of <paramref name="outputs"/> is
+    /// payout-backed, the payouts are claimed under the fulfillment lock <b>before</b> the
+    /// spend executes (see <see cref="ArkPayoutFulfillmentService"/>) and the returned error
+    /// message — instead of a spend — signals a payout that could not be claimed.
     /// </summary>
-    private async Task MarkPayoutFromSpendResult(string payoutId, SpendResult? spendResult, CancellationToken token)
+    private async Task<string?> SpendFulfillingPayouts(
+        IEnumerable<SendOutputViewModel> outputs,
+        Func<CancellationToken, Task<SpendResult>> spend,
+        CancellationToken token)
     {
-        try
-        {
-            using var disposable = await arkPayoutHandler.PayoutLocker.LockOrNullAsync(payoutId, 0, token);
-            if (disposable is null) return;
+        var payoutIds = outputs
+            .Where(o => !string.IsNullOrEmpty(o.PayoutId))
+            .Select(o => o.PayoutId!)
+            .ToArray();
 
-            var proof = ArkPayoutProof.FromSpendResult(spendResult);
-            await pullPaymentHostedService.MarkPaid(new MarkPayoutRequest
-            {
-                PayoutId = payoutId,
-                Proof = arkPayoutHandler.SerializeProof(proof),
-                State = proof.ResolvedPayoutState ?? BTCPayServer.Client.Models.PayoutState.Completed
-            });
-        }
-        catch
+        if (payoutIds.Length == 0)
         {
-            // Best-effort: on failure the payout stays AwaitingPayment and must be reconciled manually.
+            await spend(token);
+            return null;
         }
+
+        var fulfillment = await payoutFulfillment.FulfillPayouts(payoutIds, spend, token);
+        return fulfillment.Executed ? null : fulfillment.Error;
     }
 
     private static DestinationType? MapSendTypeToDestinationType(SendDestinationType type) => type switch

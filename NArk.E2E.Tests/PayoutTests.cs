@@ -139,7 +139,7 @@ public class PayoutTests : PlaywrightBaseTest
     /// An approved bitcoin-destination payout is settled by the automated processor through an
     /// ARK→BTC chain swap. Because a swap only <i>initiates</i> delivery, the payout goes
     /// InProgress (carrying the swap id) and a chain swap must be recorded;
-    /// ArkPayoutSwapListener later completes it once the swap settles, so a fast regtest
+    /// ArkPayoutSettlementListener later completes it once the swap settles, so a fast regtest
     /// settlement may already show Completed by the time we observe it.
     /// </summary>
     [Fact]

@@ -1,4 +1,3 @@
-using AsyncKeyedLock;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
@@ -50,8 +49,6 @@ public class ArkPayoutHandler : IPayoutHandler, IHasNetwork
         _networkProvider = networkProvider;
         _arkNetworkConfig = arkNetworkConfig;
     }
-    public readonly AsyncKeyedLocker<string> PayoutLocker = new();
-    
     public string Currency => "BTC";
     public PayoutMethodId PayoutMethodId => ArkadePlugin.ArkadePayoutMethodId;
 
