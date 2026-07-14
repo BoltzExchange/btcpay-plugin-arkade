@@ -201,6 +201,8 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Data.Migrations
 
                     b.HasKey("Script", "WalletId");
 
+                    b.HasIndex("ActivityState");
+
                     b.HasIndex("Scope");
 
                     b.HasIndex("WalletId");

@@ -23,5 +23,7 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
         modelBuilder.Entity<ArkWalletEntity>()
             .Property(w => w.AccountDescriptor)
             .HasDefaultValue(null);
+        modelBuilder.Entity<ArkWalletContractEntity>()
+            .HasIndex(c => c.ActivityState);
     }
 }
