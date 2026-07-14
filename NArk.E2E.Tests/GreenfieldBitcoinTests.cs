@@ -58,22 +58,40 @@ public class GreenfieldBitcoinTests : PlaywrightBaseTest
         Assert.False(rejectResp.Ok, "Bitcoin settlement send should reject explicit inputOutpoints.");
         Assert.Contains("inputOutpoints is not supported", await rejectResp.TextAsync());
 
-        var sendResp = await Page.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/api/v1/stores/{storeId}/arkade/send").AbsoluteUri,
-            new APIRequestContextOptions
+        var sendDeadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+        while (true)
+        {
+            await PollForSpendableCoinsAsync(
+                storeId, "BitcoinAddress", 20_000, TimeSpan.FromMinutes(1));
+
+            var sendResp = await Page.Context.APIRequest.PostAsync(
+                new Uri(ServerUri!, $"/api/v1/stores/{storeId}/arkade/send").AbsoluteUri,
+                new APIRequestContextOptions
+                {
+                    Headers = new Dictionary<string, string>
+                    {
+                        ["Authorization"] = authHeader,
+                        ["Content-Type"] = "application/json"
+                    },
+                    DataObject = new
+                    {
+                        destination,
+                        amountSats = 20_000L
+                    }
+                });
+            if (sendResp.Ok)
+                break;
+
+            var sendError = await sendResp.TextAsync();
+            Assert.Contains("VTXO_ALREADY_REGISTERED", sendError);
+            if (DateTimeOffset.UtcNow > sendDeadline)
             {
-                Headers = new Dictionary<string, string>
-                {
-                    ["Authorization"] = authHeader,
-                    ["Content-Type"] = "application/json"
-                },
-                DataObject = new
-                {
-                    destination,
-                    amountSats = 20_000L
-                }
-            });
-        Assert.True(sendResp.Ok, $"send returned {sendResp.Status}: {await sendResp.TextAsync()}");
+                throw new TimeoutException(
+                    $"The BIP21 send remained reserved by active intents: {sendError}");
+            }
+
+            await Task.Delay(3_000);
+        }
 
         await WaitForChainSwapAsync(
             _fixture.ServerTester!.PayTester.ServiceProvider,

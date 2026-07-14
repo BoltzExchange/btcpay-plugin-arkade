@@ -386,17 +386,22 @@ public class ArkController(
         }
 
         var totalVtxoCount = 0;
+        IReadOnlyCollection<ArkVtxo> walletVtxos = [];
+        IReadOnlyCollection<ArkContractEntity> walletContracts = [];
         try
         {
-            var vtxos = await vtxoStorage.GetVtxos(
+            walletVtxos = await vtxoStorage.GetVtxos(
                 walletIds: [config.WalletId!],
                 includeSpent: true,
                 cancellationToken: cancellationToken);
-            totalVtxoCount = vtxos.Count;
+            walletContracts = await contractStorage.GetContracts(
+                walletIds: [config.WalletId!],
+                cancellationToken: cancellationToken);
+            totalVtxoCount = walletVtxos.Count;
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Failed to load VTXO count for wallet {WalletId}", config.WalletId);
+            logger.LogDebug(ex, "Failed to load VTXOs and contracts for wallet {WalletId}", config.WalletId);
         }
 
         var recentPaymentCount = recentPayments.Count;
@@ -472,6 +477,14 @@ public class ArkController(
                     SwapStatus = swap.Status
                 });
             }
+
+            var swapContractScripts = await db.Swaps
+                .Where(s => s.WalletId == config.WalletId!)
+                .Select(s => s.ContractScript)
+                .ToListAsync(cancellationToken);
+
+            recentPayments.AddRange(WalletActivityBuilder.BuildEntries(
+                walletVtxos, walletContracts, swapContractScripts.ToHashSet()));
         }
         catch (Exception ex)
         {
@@ -530,16 +543,16 @@ public class ArkController(
         if (errorResult != null) return errorResult;
 
         var walletId = config!.WalletId!;
+        var filename = $"arkade-wallet-{walletId}-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.log";
         var stream = walletLogStore.OpenForRead(walletId);
         if (stream is null)
         {
-            TempData[WellKnownTempData.SuccessMessage] =
-                "No diagnostic log entries have been recorded for this wallet yet. " +
-                "Use the wallet (send / receive / sync) and try again.";
-            return RedirectToAction(nameof(StoreOverview), new { storeId });
+            const string noEntries =
+                "No diagnostic log entries have been recorded for this wallet yet.\n";
+            return File(System.Text.Encoding.UTF8.GetBytes(noEntries),
+                "text/plain; charset=utf-8", filename);
         }
 
-        var filename = $"arkade-wallet-{walletId}-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.log";
         return File(stream, "text/plain; charset=utf-8", filename);
     }
 

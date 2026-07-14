@@ -25,6 +25,11 @@
 
     string PaymentBadgeLabel(RecentPaymentViewModel payment)
     {
+        if (payment.BadgeLabel is not null)
+        {
+            return payment.BadgeLabel;
+        }
+
         return payment.PaymentStatus switch
         {
             PaymentStatus.Settled => "Settled",
@@ -43,6 +48,11 @@
 
     string PaymentBadgeClass(RecentPaymentViewModel payment)
     {
+        if (payment.BadgeClass is not null)
+        {
+            return payment.BadgeClass;
+        }
+
         return payment.PaymentStatus switch
         {
             PaymentStatus.Settled => "text-bg-success",
@@ -217,11 +227,11 @@
                 var prefix = payment.AmountPrefix ?? (payment.IsOutgoing ? "-" : "+");
                 var badgeLabel = PaymentBadgeLabel(payment);
                 var badgeClass = PaymentBadgeClass(payment);
-                <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-2 py-3 @(index == 0 ? "pt-0" : "border-top")">
+                <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-2 py-3 @(index == 0 ? "pt-0" : "border-top")" data-testid="activity-row">
                     <div class="min-w-0">
                         <div class="d-flex flex-wrap align-items-center gap-2">
-                            <div class="fw-semibold">@payment.Title</div>
-                            <span class="badge rounded-pill @badgeClass">@badgeLabel</span>
+                            <div class="fw-semibold" data-testid="activity-title">@payment.Title</div>
+                            <span class="badge rounded-pill @badgeClass" data-testid="activity-badge">@badgeLabel</span>
                         </div>
                         <div class="text-muted small">
                             @if (!string.IsNullOrEmpty(payment.Description))
