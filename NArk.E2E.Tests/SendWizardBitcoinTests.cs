@@ -37,14 +37,9 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
 
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
         await PayArkadeInvoiceAsync(client, storeId, 200_000);
-        var outpoints = await PollForSpendableCoinsAsync(
-            storeId, "BitcoinAddress", 20_000, TimeSpan.FromMinutes(5));
-        Assert.NotEmpty(outpoints);
-
         var bitcoinAddress = await GetNewRegtestBitcoinAddressAsync();
 
-        var selectedVtxos = Uri.EscapeDataString(string.Join(",", outpoints));
-        await GoToUrl($"/plugins/ark/stores/{storeId}/send?vtxos={selectedVtxos}");
+        await OpenSendWithSpendableCoinsAsync(storeId, 20_000);
         await Page!.FillAsync(".destination-input", bitcoinAddress);
         // 0.0002 BTC (20k sats) is within the regtest chain-swap limits (GreenfieldBitcoinTests
         // settles this exact amount via chain swap).
@@ -97,15 +92,10 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
 
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
         await PayArkadeInvoiceAsync(client, storeId, fundingSats);
-        var outpoints = await PollForSpendableCoinsAsync(
-            storeId, "BitcoinAddress", belowMinSats, TimeSpan.FromMinutes(5));
-        Assert.NotEmpty(outpoints);
-
         var bitcoinAddress = await GetNewRegtestBitcoinAddressAsync();
         var amountBtc = (belowMinSats / 100_000_000m).ToString("0.00000000", CultureInfo.InvariantCulture);
 
-        var selectedVtxos = Uri.EscapeDataString(string.Join(",", outpoints));
-        await GoToUrl($"/plugins/ark/stores/{storeId}/send?vtxos={selectedVtxos}");
+        await OpenSendWithSpendableCoinsAsync(storeId, belowMinSats);
         await Page!.FillAsync(".destination-input", bitcoinAddress);
         await Page.FillAsync(".amount-input", amountBtc);
 
@@ -129,5 +119,30 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
             "Arkade spend type should remain enabled for a single-output Bitcoin address");
         Assert.False(await Page.Locator("#spend-type-batch").IsCheckedAsync(),
             "The Batch radio should not be force-selected for a single-output Bitcoin address");
+    }
+
+    private async Task OpenSendWithSpendableCoinsAsync(string storeId, long amountSats)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var outpoints = await PollForSpendableCoinsAsync(
+                storeId, "BitcoinAddress", amountSats, deadline - DateTimeOffset.UtcNow);
+            Assert.NotEmpty(outpoints);
+
+            var selectedVtxos = Uri.EscapeDataString(string.Join(",", outpoints));
+            await GoToUrl($"/plugins/ark/stores/{storeId}/send?vtxos={selectedVtxos}");
+
+            // The intent scheduler can reserve the selected VTXOs between the
+            // spendability poll and this GET. Retry with the post-batch outpoints
+            // instead of waiting for an input that this response cannot render.
+            if (await Page!.Locator(".destination-input").CountAsync() > 0 &&
+                await Page.Locator(".coin-checkbox:checked").CountAsync() > 0)
+                return;
+
+            await Task.Delay(3_000);
+        }
+
+        throw new TimeoutException($"The send wizard never rendered spendable coins for store {storeId}.");
     }
 }

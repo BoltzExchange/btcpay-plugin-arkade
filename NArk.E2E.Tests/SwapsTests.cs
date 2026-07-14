@@ -47,10 +47,6 @@ public class SwapsTests : PlaywrightBaseTest
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
         await PayArkadeInvoiceAsync(client, storeId, 200_000);
 
-        // BOLT11 on the nigiri "lnd" node Boltz can route to.
-        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 600);
-        Assert.False(string.IsNullOrWhiteSpace(bolt11));
-
         // Wait on swap-eligible (LightningInvoice = non-recoverable) coins
         // being actually spendable, not the rendered balance. In the full
         // shared suite, note redemption can take longer than the generic
@@ -59,35 +55,36 @@ public class SwapsTests : PlaywrightBaseTest
             storeId, "LightningInvoice", 20_000, TimeSpan.FromMinutes(10));
         Assert.NotEmpty(outpoints);
 
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-        var token = (await GetAntiforgeryTokenAsync()) ?? "";
+        // Create the short-lived invoice only after the wallet is ready.
+        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 600);
+        Assert.False(string.IsNullOrWhiteSpace(bolt11));
 
-        // Manual coin selection with the polled non-recoverable outpoints:
-        // Lightning sends reject recoverable (swept) coins, so pin the exact
-        // selection rather than letting auto mode pick.
-        var resp = await Page!.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["RequestVerificationToken"] = token,
-                    ["Content-Type"] = "application/x-www-form-urlencoded"
-                },
-                Data = "CoinSelectionMode=manual" +
-                       string.Concat(outpoints.Select(o => $"&selectedVtxoOutpoints={Uri.EscapeDataString(o)}")) +
-                       $"&Outputs[0].Destination={Uri.EscapeDataString(bolt11)}"
-            });
-
-        Assert.True(resp.Ok, $"send (LN) returned {resp.Status}");
-
-        // The submarine swap is created synchronously during the spend;
-        // poll the in-process swap storage briefly for it.
         var swapStorage = _fixture.ServerTester!.PayTester.ServiceProvider
             .GetRequiredService<ISwapStorage>();
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(1);
-        while (DateTimeOffset.UtcNow < deadline)
+        var sendDeadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+        while (DateTimeOffset.UtcNow < sendDeadline)
         {
+            await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
+            var token = (await GetAntiforgeryTokenAsync()) ?? "";
+
+            // The batch scheduler can reserve the selected VTXOs between the
+            // spendability poll and this POST. A validation failure renders the
+            // send view with HTTP 200, so only a recorded swap proves success.
+            var resp = await Page!.Context.APIRequest.PostAsync(
+                new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
+                new APIRequestContextOptions
+                {
+                    Headers = new Dictionary<string, string>
+                    {
+                        ["RequestVerificationToken"] = token,
+                        ["Content-Type"] = "application/x-www-form-urlencoded"
+                    },
+                    Data = "CoinSelectionMode=manual" +
+                           string.Concat(outpoints.Select(o => $"&selectedVtxoOutpoints={Uri.EscapeDataString(o)}")) +
+                           $"&Outputs[0].Destination={Uri.EscapeDataString(bolt11)}"
+                });
+            Assert.True(resp.Ok, $"send (LN) returned {resp.Status}");
+
             var swaps = await swapStorage.GetSwaps(
                 walletIds: [walletId!],
                 swapTypes: [ArkSwapType.Submarine]);
@@ -96,9 +93,15 @@ public class SwapsTests : PlaywrightBaseTest
                 Assert.Contains(swaps, s => s.SwapType == ArkSwapType.Submarine);
                 return;
             }
-            await Task.Delay(2_000);
+
+            await Task.Delay(3_000);
+            var remaining = sendDeadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+                break;
+            outpoints = await PollForSpendableCoinsAsync(
+                storeId, "LightningInvoice", 20_000, remaining);
         }
-        Assert.Fail("no Submarine swap was recorded for the wallet after the LN spend");
+        Assert.Fail("no Submarine swap was recorded after retrying the LN spend");
     }
 
     /// <summary>

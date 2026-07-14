@@ -180,9 +180,13 @@ public class PayoutTests : PlaywrightBaseTest
 
         await client.ApprovePayout(storeId, payout.Id, new ApprovePayoutRequest());
 
+        // A freshly funded VTXO may be registered by the intent scheduler between the
+        // spendability check and the processor tick. The processor leaves the payout
+        // AwaitingPayment and retries after that intent's batch settles, matching the
+        // Ark-address payout flow above.
         var settling = await PollPayoutStateAsync(
             client, storeId, payout.Id,
-            [PayoutState.InProgress, PayoutState.Completed], TimeSpan.FromMinutes(3));
+            [PayoutState.InProgress, PayoutState.Completed], TimeSpan.FromMinutes(8));
         Assert.True(settling.State is PayoutState.InProgress or PayoutState.Completed,
             $"expected the chain-swap payout to be InProgress (or Completed after settlement), got {settling.State}");
         Assert.NotNull(settling.PaymentProof);

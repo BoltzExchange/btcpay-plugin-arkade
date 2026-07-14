@@ -73,6 +73,10 @@ public class RecentPaymentViewModel
     public bool IsOutgoing { get; set; }
     public PaymentStatus? PaymentStatus { get; set; }
     public ArkSwapStatus? SwapStatus { get; set; }
+
+    /// <summary>Overrides the badge derived from <see cref="PaymentStatus"/>/<see cref="SwapStatus"/> (e.g. boarding rows).</summary>
+    public string? BadgeLabel { get; set; }
+    public string? BadgeClass { get; set; }
 }
 
 public class StoreOverviewStatViewModel

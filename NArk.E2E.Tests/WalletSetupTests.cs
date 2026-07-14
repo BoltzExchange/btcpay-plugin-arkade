@@ -245,7 +245,8 @@ public class WalletSetupTests : PlaywrightBaseTest
         var storeId = await CreateStoreWithArkWalletAsync();
 
         var resp = await Page!.Context.APIRequest.GetAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/wallet-log").AbsoluteUri);
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/wallet-log").AbsoluteUri,
+            new APIRequestContextOptions { MaxRedirects = 0 });
         Assert.True(resp.Ok, $"wallet-log endpoint returned {resp.Status}");
     }
 
