@@ -1,6 +1,6 @@
-# Arkade for BTCPay Server
+# Boltz.Arkade for BTCPay Server
 
-> Accept Bitcoin payments through [Arkade](https://arkadeos.com) — a self-custodial, off-chain Bitcoin Layer 2 — directly inside BTCPay Server.
+> Accept Bitcoin payments through [Arkade](https://arkadeos.com) — a self-custodial, off-chain Bitcoin Layer 2 — directly inside BTCPay Server. Built by [Boltz](https://boltz.exchange).
 
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![BTCPay Plugin](https://img.shields.io/badge/BTCPay%20Server-Plugin-orange)](https://btcpayserver.org)
@@ -9,7 +9,7 @@
 
 ## What Is This?
 
-**btcpay-arkade** is a BTCPay Server plugin that integrates [Arkade](https://arkadeos.com) as a payment method. It lets merchants accept instant, low-fee Bitcoin payments off-chain while retaining full self-custody — no Lightning node required, no custodian involved.
+**Boltz.Arkade** is a BTCPay Server plugin published by Boltz Exchange. It integrates [Arkade](https://arkadeos.com) as a payment method so merchants can accept instant, low-fee Bitcoin payments off-chain while retaining full self-custody — no Lightning node required, no custodian involved.
 
 Payments are settled through **Virtual UTXOs (VTXOs)**, Arkade's off-chain Bitcoin outputs that are cryptographically anchored to real Bitcoin and can be unilaterally exited to the base chain at any time.
 
@@ -34,7 +34,7 @@ The checkout page presents applicable methods in a single BIP-21 QR code when mu
 
 ```
 BTCPay Server
-└── Arkade Plugin
+└── Boltz.Arkade Plugin (BTCPayServer.Plugins.Boltz.Arkade)
     ├── ArkController              # HTTP endpoints for store management
     ├── ArkContractInvoiceListener # Monitors contract state → updates invoice status
     ├── BoardingTransactionListener# Watches on-chain boarding UTXOs via NBXplorer
@@ -56,7 +56,7 @@ The plugin persists all state (VTXOs, contracts, swaps, intents, wallets) in BTC
 - **Arkade server (arkd)** v0.9.0 or later — accessible over gRPC from your BTCPay host
 - **.NET 10** SDK (if building from source)
 
-> ⚠️ **Alpha software.** This plugin is actively developed and not yet recommended for high-value production deployments. Always maintain a backup of your seed phrase.
+> ⚠️ **Early release (v0.1.x).** This plugin is under active development. Test thoroughly before production use. Always maintain a backup of your seed phrase.
 
 ---
 
@@ -66,14 +66,14 @@ The plugin persists all state (VTXOs, contracts, swaps, intents, wallets) in BTC
 
 1. Open your BTCPay Server instance
 2. Go to **Server Settings → Plugins**
-3. Search for **"Arkade"**
+3. Search for **"Boltz.Arkade"** (or upload the `.btcpay` bundle manually)
 4. Click **Install** and restart when prompted
 
 ### From Source
 
 ```bash
-git clone https://github.com/ArkLabsHQ/btcpay-arkade.git
-cd btcpay-arkade
+git clone https://github.com/BoltzExchange/btcpay-plugin-arkade.git
+cd btcpay-plugin-arkade
 make setup        # Pulls submodules, restores workloads, publishes plugin
 ```
 
@@ -195,7 +195,7 @@ make migration NAME=<MigrationName>
 ### Project Structure
 
 ```
-btcpay-arkade/
+btcpay-plugin-arkade/
 ├── BTCPayServer.Plugins.Boltz.Arkade/   # Main BTCPay plugin
 │   ├── Controllers/                     # HTTP controllers
 │   ├── Data/                           # EF Core entities & migrations
@@ -295,7 +295,7 @@ Content-Type: application/json
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ---
 
@@ -311,13 +311,12 @@ Pull requests are welcome. For significant changes, open an issue first to discu
 
 ## Links
 
+- [Boltz Exchange](https://boltz.exchange) — publisher; trustless Lightning ↔ on-chain swaps
 - [Arkade](https://arkadeos.com) — the Ark protocol implementation
-- [Ark Labs](https://arklabs.to) — the team building Arkade
 - [BTCPay Server](https://btcpayserver.org) — the self-hosted payment processor
-- [Boltz Exchange](https://boltz.exchange) — trustless Lightning ↔ on-chain swaps
 
 ---
 
 ## License
 
-[MIT](LICENSE) © Ark Labs
+[MIT](LICENSE) © Boltz Exchange

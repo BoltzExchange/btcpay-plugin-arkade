@@ -1,5 +1,5 @@
 # NArk Repo Guide
-A BTCPayServer plugin that lets merchants accept Bitcoin through Arkade — a
+A BTCPay Server plugin (**Boltz.Arkade**, published by Boltz Exchange) that lets merchants accept Bitcoin through Arkade — a
 self-custodial, offchain protocol built directly on Bitcoin. The plugin and its
 test project target **.NET 10**; the NNark SDK libraries (in the submodule)
 target **.NET 8**.
