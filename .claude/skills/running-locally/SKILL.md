@@ -18,13 +18,14 @@ Plain agent-agnostic markdown — usable by any coding agent (it is referenced f
 ## One-time setup
 
 ```sh
-./setup.ps1   # Windows · ./setup.sh on Linux/macOS — submodules, workloads, publishes plugin, writes appsettings.dev.json
+make setup    # submodules, workloads, publishes plugin, writes appsettings.dev.json
+.\setup.ps1   # Windows equivalent
 ```
 
 ## Start the regtest stack (~19 containers)
 
 ```sh
-node submodules/NNark/regtest/regtest.mjs start --profile boltz,delegate
+make regtest   # = node submodules/NNark/regtest/regtest.mjs start --profile boltz,delegate
 # Windows shortcut: start-test-env.cmd (args pass through: `start-test-env stop`, `... clean`, `... mine 5`)
 ```
 
@@ -64,9 +65,9 @@ First launch builds the whole BTCPay solution — allow ~5 minutes before the po
 
 ## Stop / iterate
 
-- Stop BTCPay: kill the `dotnet` process. Restart: same `dotnet run -lp Bitcoin`.
-- After plugin code changes: `dotnet publish BTCPayServer.Plugins.Boltz.Arkade -c Debug -o BTCPayServer.Plugins.Boltz.Arkade/bin/Debug/net10.0` (what setup.ps1 does), then restart BTCPay.
-- Stack: `regtest.mjs stop` keeps data; `regtest.mjs clean` wipes volumes.
+- Stop BTCPay: kill the `dotnet` process. Restart: same `dotnet run -lp Bitcoin`. (`make run`/`make dev` use the `Bitcoin-HTTPS` profile instead — both work; this recipe sticks to `Bitcoin` for the headless flow.)
+- After plugin code changes: `dotnet publish BTCPayServer.Plugins.Boltz.Arkade -c Debug -o BTCPayServer.Plugins.Boltz.Arkade/bin/Debug/net10.0` (what `make setup` does), then restart BTCPay.
+- Stack: `make regtest-stop` keeps data; `make regtest-clean` wipes volumes.
 
 ## Common mistakes
 

@@ -11,3 +11,7 @@ nul
 .claude/*
 !.claude/skills/
 btcpay-run*.log
+
+# PluginPacker output
+/publish
+/release

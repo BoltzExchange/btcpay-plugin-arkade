@@ -2,7 +2,6 @@
 
 > Accept Bitcoin payments through [Arkade](https://arkadeos.com) — a self-custodial, off-chain Bitcoin Layer 2 — directly inside BTCPay Server.
 
-[![Version](https://img.shields.io/badge/version-2.1.14-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![BTCPay Plugin](https://img.shields.io/badge/BTCPay%20Server-Plugin-orange)](https://btcpayserver.org)
 
@@ -75,19 +74,21 @@ The plugin persists all state (VTXOs, contracts, swaps, intents, wallets) in BTC
 ```bash
 git clone https://github.com/ArkLabsHQ/btcpay-arkade.git
 cd btcpay-arkade
-./setup.sh        # Pulls submodules, restores workloads, publishes plugin
+make setup        # Pulls submodules, restores workloads, publishes plugin
 ```
 
-On Windows:
+On Windows (no `make` required):
 ```powershell
 .\setup.ps1
 ```
 
-The setup script will:
-- Pull the `submodules/btcpayserver` submodule
+`make setup` will:
+- Pull the `submodules/btcpayserver` and `submodules/NNark` submodules
 - Restore .NET workloads
-- Create a plugin entry in your BTCPay config
-- Publish the plugin to the correct location
+- Publish the plugin (bundling its NNark dependencies)
+- Register the plugin with the dev server via `appsettings.dev.json`
+
+See [docs/building-the-plugin.md](docs/building-the-plugin.md) for details.
 
 ---
 
@@ -175,25 +176,18 @@ The setup script will:
 
 ### Running Tests
 
-After running `setup.sh`, start the local regtest environment (Bitcoin + arkd + Boltz/Fulmine) — a cross-platform Node CLI, no WSL required:
+After running `make setup`, start the local regtest environment (Bitcoin + arkd + Boltz/Fulmine — a cross-platform Node CLI) and run the E2E suite:
 ```bash
-node submodules/NNark/regtest/regtest.mjs start --profile boltz,delegate
+make regtest
+make test
 ```
 
-On Windows (wraps the same CLI; extra arguments pass through, e.g. `start-test-env stop`):
-```cmd
-start-test-env.cmd
-```
-
-This spins up a regtest Bitcoin node, an Arkade server, and supporting services locally. Then run the E2E test suite:
-```bash
-dotnet test NArk.E2E.Tests/NArk.E2E.Tests.csproj
-```
+`make regtest-stop` keeps the stack's data, `make regtest-clean` wipes it; other regtest actions go through the CLI directly, e.g. `node submodules/NNark/regtest/regtest.mjs mine 5`. On Windows use `start-test-env.cmd` (arguments pass through, e.g. `start-test-env stop`).
 
 ### Adding EF Core Migrations
 
 ```bash
-./add-migration.sh <MigrationName>
+make migration NAME=<MigrationName>
 # or on Windows:
 .\add-migration.ps1 <MigrationName>
 ```
@@ -213,18 +207,14 @@ btcpay-arkade/
 ├── submodules/
 │   ├── NNark/                          # .NET Arkade SDK (NArk.Core / .Swaps / .Storage.EfCore)
 │   └── btcpayserver/                   # BTCPay Server source (build dependency)
-├── docs/                               # Internal design documents
-├── setup.sh / setup.ps1               # First-time setup scripts
-└── add-migration.sh / .ps1            # EF Core migration helpers
+├── docs/                               # Developer docs & internal design documents
+├── Makefile                            # setup / dev / test / release targets
+└── setup.ps1 / add-migration.ps1 / start-test-env.cmd   # Windows equivalents
 ```
 
 ### Release Process
 
-CI automatically creates a GitHub Release with the changelog body when a version tag is pushed:
-```bash
-git tag v2.1.14
-git push origin v2.1.14
-```
+Bump `<Version>` in `BTCPayServer.Plugins.Boltz.Arkade.csproj`, update `CHANGELOG.md` (with an otherwise clean working tree), and run `make gh-release` — it packs the plugin with BTCPay's `PluginPacker`, commits the pending changes as the version bump, pushes a signed tag, and creates a draft GitHub release with signed `SHA256SUMS`. See [docs/release-process.md](docs/release-process.md).
 
 ---
 
