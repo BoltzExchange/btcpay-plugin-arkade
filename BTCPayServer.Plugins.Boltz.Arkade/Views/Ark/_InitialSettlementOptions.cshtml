@@ -1,0 +1,104 @@
+@using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@model BTCPayServer.Plugins.Boltz.Arkade.Models.InitialWalletSetupViewModel
+
+@{
+    var prefix = ViewData["SettlementPrefix"] as string ?? "settlement";
+    var submitTestId = ViewData["SubmitTestId"] as string ?? "settlement-submit-btn";
+    var submitLabel = ViewData["SubmitLabel"] as string ?? "Continue";
+    var walletStepLabel = ViewData["WalletStepLabel"] as string ?? "Wallet details";
+    var showStep = ViewData["ShowSettlementStep"] as bool? == true;
+}
+
+<div data-settlement-step data-testid="settlement-step" class="@(showStep ? "" : "d-none")">
+    <div class="border rounded p-3 mb-4 bg-light">
+        <div class="text-secondary small">Wallet</div>
+        <div class="fw-semibold">@walletStepLabel</div>
+    </div>
+
+    <div class="mb-3">
+        <h3 class="h5 mb-1">Settlement options</h3>
+        <p class="text-secondary mb-0">Configure where Arkade funds settle after setup.</p>
+    </div>
+
+    <div class="vstack gap-3 mb-4">
+        @foreach (var option in Model.SettlementOptions)
+        {
+            var optionSlug = option.Type switch
+            {
+                StoreSettlementOption.BitcoinMainchain => "mainchain",
+                _ => option.Type.ToString()
+            };
+            var optionTestId = $"settlement-option-{optionSlug}";
+
+            <div class="border rounded p-3 @(option.Available ? "" : "bg-light")"
+                 data-testid="@optionTestId"
+                 aria-disabled="@(!option.Available)">
+                <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
+                    <div class="min-w-0">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                            <div class="fw-semibold">@option.Title</div>
+                            @if (option.Available)
+                            {
+                                <span class="badge bg-light text-muted border">Optional</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-white text-muted border" data-testid="@($"{optionTestId}-disabled")">Unavailable</span>
+                            }
+                        </div>
+                        <p class="text-secondary mb-0">@option.Description</p>
+                    </div>
+                </div>
+
+                @if (option.Available && option.Data is { } mainchainData)
+                {
+                    var thresholdValue = mainchainData.Value<string>(MainchainSettlementData.ThresholdKey);
+                    var minSats = mainchainData.Value<long?>(MainchainSettlementData.MinSatsKey);
+                    var maxSats = mainchainData.Value<long?>(MainchainSettlementData.MaxSatsKey);
+                    var thresholdField = SettlementInputName.Field(option.Type, MainchainSettlementData.ThresholdKey);
+                    var thresholdInputId = $"{prefix}{option.Type}{MainchainSettlementData.ThresholdKey}";
+                    var thresholdHelp = minSats is not null && maxSats is not null
+                        ? $"Leave blank to keep this option disabled. Allowed range: {minSats.Value:#,0}-{maxSats.Value:#,0} sats."
+                        : "Leave blank to keep this option disabled. Boltz limits could not be loaded.";
+
+                    <div class="form-group mt-3">
+                        <label for="@thresholdInputId" class="form-label">Settlement threshold</label>
+                        <div class="input-group">
+                            <input id="@thresholdInputId"
+                                   name="@thresholdField"
+                                   value="@thresholdValue"
+                                   class="form-control"
+                                   type="number"
+                                   min="@(minSats ?? 0)"
+                                   max="@maxSats"
+                                   step="1"
+                                   placeholder="Disabled"
+                                   data-settlement-focus
+                                   data-testid="settlement-threshold-input" />
+                            <span class="input-group-text">sats</span>
+                        </div>
+                        @Html.ValidationMessage(thresholdField, null, new { @class = "text-danger" })
+                        <div class="form-text mt-2">
+                            @thresholdHelp
+                        </div>
+                    </div>
+                }
+                else if (!option.Available)
+                {
+                    <div class="alert alert-warning small mb-0 mt-3"
+                         data-settlement-focus
+                         data-testid="@($"settlement-{optionSlug}-requirement")"
+                         tabindex="-1">
+                        @option.UnavailableReason
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-secondary" data-settlement-back>Back</button>
+        <button name="command" type="submit" value="save" class="btn btn-primary" data-testid="@submitTestId">@submitLabel</button>
+    </div>
+</div>

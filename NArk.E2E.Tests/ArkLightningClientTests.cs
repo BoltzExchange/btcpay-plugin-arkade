@@ -1,5 +1,5 @@
 using BTCPayServer.Lightning;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
+using BTCPayServer.Plugins.Boltz.Arkade.Lightning;
 using NArk.Swaps.Models;
 using NBitcoin;
 using Xunit;

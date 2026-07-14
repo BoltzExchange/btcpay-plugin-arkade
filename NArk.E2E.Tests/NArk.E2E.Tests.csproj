@@ -40,7 +40,7 @@
       <PrivateAssets>all</PrivateAssets>
     </ProjectReference>
     <!-- Plugin under test -->
-    <ProjectReference Include="..\BTCPayServer.Plugins.ArkPayServer\BTCPayServer.Plugins.ArkPayServer.csproj">
+    <ProjectReference Include="..\BTCPayServer.Plugins.Boltz.Arkade\BTCPayServer.Plugins.Boltz.Arkade.csproj">
       <PrivateAssets>all</PrivateAssets>
     </ProjectReference>
   </ItemGroup>

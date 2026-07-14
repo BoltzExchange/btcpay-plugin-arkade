@@ -5,7 +5,7 @@ test project target **.NET 10**; the NNark SDK libraries (in the submodule)
 target **.NET 8**.
 
 ## Structure
-- `BTCPayServer.Plugins.ArkPayServer`: the plugin. Payment handlers, store UI
+- `BTCPayServer.Plugins.Boltz.Arkade`: the plugin. Payment handlers, store UI
   (Razor), controllers, and EF Core (PostgreSQL) persistence; consumes the
   NNark SDK and BTCPayServer's payment pipeline.
 - `submodules/NNark`: the Arkade .NET SDK (GitHub `arkade-os/dotnet-sdk`).

@@ -1,5 +1,5 @@
 using BTCPayServer.Data;
-using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
+using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler;
 using Microsoft.Playwright;
 using Newtonsoft.Json.Linq;
 using Xunit;

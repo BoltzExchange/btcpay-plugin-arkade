@@ -20,9 +20,9 @@ var configuration = args.Length > 0 ? args[0] : "Debug";
 
 var pluginDll = Path.GetFullPath(Path.Combine(
     repoRoot,
-    "BTCPayServer.Plugins.ArkPayServer",
+    "BTCPayServer.Plugins.Boltz.Arkade",
     "bin", configuration, "net10.0",
-    "BTCPayServer.Plugins.ArkPayServer.dll"));
+    "BTCPayServer.Plugins.Boltz.Arkade.dll"));
 
 if (!File.Exists(pluginDll))
 {
