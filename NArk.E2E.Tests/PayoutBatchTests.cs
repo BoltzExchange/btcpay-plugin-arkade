@@ -167,7 +167,7 @@ public class PayoutBatchTests : PlaywrightBaseTest
                 await Page.Locator(".coin-checkbox:checked").CountAsync() > 0)
                 return;
 
-            await Task.Delay(3_000);
+            await Task.Delay(500);
         }
 
         throw new TimeoutException($"The send wizard never rendered spendable coins for store {storeId}.");
@@ -183,7 +183,7 @@ public class PayoutBatchTests : PlaywrightBaseTest
             latest = await client.GetStorePayout(storeId, payoutId);
             if (expected.Contains(latest.State))
                 return latest;
-            await Task.Delay(2_000);
+            await Task.Delay(500);
         }
         return latest ?? await client.GetStorePayout(storeId, payoutId);
     }

@@ -6,6 +6,7 @@ using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using NArk.Swaps.Boltz;
+using NArk.Swaps.Models;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -48,7 +49,12 @@ public class SettlementTriggerTests : PlaywrightBaseTest
         await PayArkadeInvoiceAsync(client, storeId, 30_000);
 
         var services = _fixture.ServerTester!.PayTester.ServiceProvider;
-        await WaitForChainSwapAsync(services, walletId, TimeSpan.FromMinutes(2));
+        // The destination is the store's NBXplorer-tracked onchain wallet, not a bitcoind
+        // address, so Settled status is the strongest completion assertion available here.
+        await WaitForSwapAsync(services, walletId,
+            ArkSwapType.ChainArkToBtc,
+            [ArkSwapStatus.Settled],
+            TimeSpan.FromMinutes(4), mineWhileWaiting: true);
     }
 
     [Fact]
@@ -81,6 +87,11 @@ public class SettlementTriggerTests : PlaywrightBaseTest
             swap.ExpectedAmount <= limits.MaxAmount,
             $"settlement swap amount {swap.ExpectedAmount} exceeded Boltz max {limits.MaxAmount}");
 
+        // The capped settlement must also complete, not just be recorded.
+        await WaitForSwapAsync(services, walletId,
+            ArkSwapType.ChainArkToBtc,
+            [ArkSwapStatus.Settled],
+            TimeSpan.FromMinutes(4), mineWhileWaiting: true);
     }
 
     private async Task ConfigureArkadeWalletAsync(string storeId, long thresholdSats)
