@@ -15,7 +15,7 @@ MIGRATION_NAME="$1"
 
 # Run the EF Core migration command
 dotnet ef migrations add "$MIGRATION_NAME" \
-  --project BTCPayServer.Plugins.ArkPayServer/BTCPayServer.Plugins.ArkPayServer.csproj \
+  --project BTCPayServer.Plugins.Boltz.Arkade/BTCPayServer.Plugins.Boltz.Arkade.csproj \
   --context ArkPluginDbContext \
   --output-dir Data/Migrations
 

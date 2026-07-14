@@ -1,0 +1,81 @@
+﻿
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.Boltz.Arkade
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@using BTCPayServer.Services.Invoices
+@using BTCPayServer.Views.Stores
+@model BTCPayServer.Components.MainNav.MainNavViewModel
+@inject PaymentMethodHandlerDictionary HandlerDictionary
+@{
+    var config =
+        Model.Store
+        .GetPaymentMethodConfig<ArkadePaymentMethodConfig>(
+            ArkadePlugin.ArkadePaymentMethodId,
+            HandlerDictionary,
+            true
+        );
+    var enabled = !string.IsNullOrEmpty(config?.WalletId);
+}
+
+<li class="nav-item">
+    <a asp-controller="Ark" asp-action="@(enabled ? "StoreOverview" : "GettingStarted")"
+       asp-route-storeId="@Model.Store.Id"
+       class="nav-link @ViewData.ActivePageClass("Ark", nameof(StoreNavPages))"
+       id="StoreNav-Ark">
+        <span class="me-2 btcpay-status btcpay-status--@(enabled ? "enabled" : "pending")"></span>
+        <span>Arkade</span>
+    </a>
+
+    @if (ViewData.IsCategoryActive("Ark"))
+    {
+        @if (!enabled)
+        {
+            <li class="nav-item nav-item-sub">
+                <a id="StoreNav-GettingStarted"
+                   class="nav-link @ViewData.ActivePageClass("GettingStarted", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="GettingStarted"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Getting Started</a>
+            </li>
+        }
+        else
+        {
+            <li class="nav-item nav-item-sub">
+                <a id="StoreNav-Overview"
+                   class="nav-link @ViewData.ActivePageClass("StoreOverview", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="StoreOverview"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Overview</a>
+            </li>
+            <li class="nav-item nav-item-sub">
+                <a id="StoreNav-Receive"
+                   class="nav-link @ViewData.ActivePageClass("Receive", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="Receive"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Receive</a>
+            </li>
+            <li class="nav-item nav-item-sub">
+                <a id="StoreNav-Send"
+                   class="nav-link @ViewData.ActivePageClass("Send", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="Send"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Send</a>
+            </li>
+            <li class="nav-item nav-item-sub">
+                <a id="StoreNav-Settings"
+                   class="nav-link @ViewData.ActivePageClass("Settings", "Ark")"
+                   asp-controller="Ark"
+                   asp-action="Settings"
+                   asp-route-storeId="@Model.Store.Id"
+                   ext-translate="true">Settings</a>
+            </li>
+        }
+    }
+
+</li>

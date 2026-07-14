@@ -202,7 +202,7 @@ dotnet test NArk.E2E.Tests/NArk.E2E.Tests.csproj
 
 ```
 btcpay-arkade/
-├── BTCPayServer.Plugins.ArkPayServer/   # Main BTCPay plugin
+├── BTCPayServer.Plugins.Boltz.Arkade/   # Main BTCPay plugin
 │   ├── Controllers/                     # HTTP controllers
 │   ├── Data/                           # EF Core entities & migrations
 │   ├── Models/                         # View models

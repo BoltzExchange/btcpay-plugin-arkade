@@ -1,0 +1,182 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@using NArk.Abstractions.Wallets
+@model BTCPayServer.Plugins.Boltz.Arkade.Models.StoreSettingsViewModel
+@inject IScopeProvider ScopeProvider
+
+@{
+    ViewData.SetActivePage(category: "Ark", activePage: "Settings", title: "Arkade - Settings");
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+
+<partial name="_StatusMessage" />
+
+<div class="d-sm-flex align-items-center justify-content-between gap-3 mb-4">
+    <div>
+        <h2 class="mb-1">Settings</h2>
+    </div>
+    <a asp-action="StoreOverview" asp-route-storeId="@storeId" class="btn btn-secondary mt-3 mt-sm-0">
+        <vc:icon symbol="caret-left" />
+        Overview
+    </a>
+</div>
+
+<div class="bg-tile rounded p-3 p-sm-4 mb-4">
+    @if (!string.IsNullOrEmpty(Model.BoltzUrl))
+    {
+        <div class="d-flex align-items-center justify-content-between gap-3 py-3 border-bottom">
+            <div class="min-w-0">
+                <div class="fw-semibold">Lightning payments</div>
+                <div class="text-muted small font-monospace text-break">@Model.BoltzUrl</div>
+                @if (!Model.BoltzConnected && !string.IsNullOrEmpty(Model.BoltzError))
+                {
+                    <div class="text-danger small text-break">@Model.BoltzError</div>
+                }
+            </div>
+            <form asp-action="@(Model.IsLightningEnabled ? "DisableLightning" : "EnableLightning")" method="post" asp-route-storeId="@storeId">
+                <button type="submit" class="btn @(Model.IsLightningEnabled ? "btn-outline-secondary" : "btn-primary")">
+                    @(Model.IsLightningEnabled ? "Disable" : "Enable")
+                </button>
+            </form>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex align-items-center justify-content-between gap-3 py-3 border-bottom">
+            <div>
+                <div class="fw-semibold">Lightning payments</div>
+                <div class="text-muted small">No Boltz endpoint is configured for this network.</div>
+            </div>
+            <span class="badge text-bg-secondary">Unavailable</span>
+        </div>
+    }
+
+    <div class="py-3 border-bottom">
+        <div class="mb-3">
+            <div class="fw-semibold">Settlement</div>
+            <div class="text-muted small">Choose where Arkade funds settle when configured thresholds are reached.</div>
+        </div>
+        <div class="vstack gap-3">
+            @foreach (var option in Model.SettlementOptions)
+            {
+                var optionSlug = option.Type switch
+                {
+                    StoreSettlementOption.BitcoinMainchain => "mainchain",
+                    _ => option.Type.ToString()
+                };
+                var optionTestId = $"settlement-option-{optionSlug}";
+                <form asp-action="UpdateWalletConfig"
+                      method="post"
+                      asp-route-storeId="@storeId"
+                      class="border rounded p-3 @(option.Available ? "" : "bg-light")"
+                      data-testid="@optionTestId">
+                    <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
+                        <div class="min-w-0">
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                                <div class="fw-semibold">@option.Title</div>
+                                <span class="badge @(option.Available && option.Enabled ? "text-bg-info" : "bg-white text-muted border")">
+                                    @if (!option.Available)
+                                    {
+                                        @:Unavailable
+                                    }
+                                    else
+                                    {
+                                        @(option.Enabled ? "Enabled" : "Disabled")
+                                    }
+                                </span>
+                            </div>
+                            <p class="text-muted small mb-0">@option.Description</p>
+                        </div>
+                    </div>
+
+                    @if (option.Available && option.Data is { } mainchainData)
+                    {
+                        var thresholdValue = mainchainData.Value<string>(MainchainSettlementData.ThresholdKey);
+                        var minSats = mainchainData.Value<long?>(MainchainSettlementData.MinSatsKey);
+                        var maxSats = mainchainData.Value<long?>(MainchainSettlementData.MaxSatsKey);
+                        var thresholdField = SettlementInputName.Field(option.Type, MainchainSettlementData.ThresholdKey);
+                        var thresholdInputId = $"{option.Type}{MainchainSettlementData.ThresholdKey}";
+                        var thresholdHelp = minSats is not null && maxSats is not null
+                            ? $"Leave blank to keep this option disabled. Allowed range: {minSats.Value:#,0}-{maxSats.Value:#,0} sats."
+                            : "Leave blank to keep this option disabled. Boltz limits could not be loaded.";
+
+                        <div class="row g-2 mt-3">
+                            <div class="col-md">
+                                <div class="input-group">
+                                    <input id="@thresholdInputId"
+                                           name="@thresholdField"
+                                           value="@thresholdValue"
+                                           class="form-control"
+                                           type="number"
+                                           min="@(minSats ?? 0)"
+                                           max="@maxSats"
+                                           step="1"
+                                           placeholder="Disabled" />
+                                    <span class="input-group-text">sats</span>
+                                </div>
+                                <div class="form-text">
+                                    @thresholdHelp
+                                </div>
+                            </div>
+                            <div class="col-md-auto d-flex gap-2 align-items-start">
+                                @if (option.Enabled)
+                                {
+                                    <button type="submit" name="command" value="@option.DisableCommand" class="btn btn-outline-secondary" formnovalidate>Disable</button>
+                                }
+                                <button type="submit" name="command" value="@option.SaveCommand" class="btn btn-primary">Save</button>
+                            </div>
+                        </div>
+                    }
+                    else if (!option.Available)
+                    {
+                        <div class="alert alert-warning small mb-0 mt-3" data-testid="@($"{optionSlug}-settlement-unavailable")">
+                            @option.UnavailableReason
+                        </div>
+                    }
+                </form>
+            }
+        </div>
+    </div>
+
+    @if (Model.WalletType == WalletType.HD)
+    {
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 py-3 border-bottom">
+            <div>
+                <div class="fw-semibold">Recovery seed</div>
+                <div class="text-muted small">View this wallet's recovery seed.</div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <form method="post" asp-controller="Ark" asp-action="ShowPrivateKey" asp-route-storeId="@storeId" asp-route-returnTo="settings">
+                    <button type="submit" class="btn btn-outline-secondary">Show seed</button>
+                </form>
+            </div>
+        </div>
+    }
+
+    <div class="d-flex align-items-center justify-content-between gap-3 py-3 border-bottom">
+        <div>
+            <div class="fw-semibold">Small amounts</div>
+            <div class="text-muted small">Accept payments below the on-chain dust threshold.</div>
+        </div>
+        <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId">
+            <button type="submit" name="command" value="toggle-subdust"
+                    class="btn @(Model.AllowSubDustAmounts ? "btn-outline-secondary" : "btn-primary")">
+                @(Model.AllowSubDustAmounts ? "Disable" : "Enable")
+            </button>
+        </form>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 pt-3">
+        <form asp-action="SyncWallet" method="post" asp-route-storeId="@storeId">
+            <button type="submit" class="btn btn-outline-secondary">
+                <vc:icon symbol="actions-refresh" />
+                Sync wallet
+            </button>
+        </form>
+        <a asp-action="DownloadWalletLog" asp-route-storeId="@storeId" class="btn btn-outline-secondary">
+            Download diagnostic log
+        </a>
+    </div>
+</div>

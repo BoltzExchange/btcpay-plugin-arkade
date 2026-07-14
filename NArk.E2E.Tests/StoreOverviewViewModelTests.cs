@@ -1,5 +1,5 @@
 using BTCPayServer.Data;
-using BTCPayServer.Plugins.ArkPayServer.Models;
+using BTCPayServer.Plugins.Boltz.Arkade.Models;
 using NArk.Abstractions.Wallets;
 using Xunit;
 

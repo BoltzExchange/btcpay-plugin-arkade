@@ -1,5 +1,5 @@
 using BTCPayServer.Data;
-using BTCPayServer.Plugins.ArkPayServer.Services;
+using BTCPayServer.Plugins.Boltz.Arkade.Services;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.VTXOs;
 using NArk.Core.Contracts;

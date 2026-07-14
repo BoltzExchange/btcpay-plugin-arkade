@@ -1,0 +1,13 @@
+namespace BTCPayServer.Plugins.Boltz.Arkade.Models.Api.Greenfield;
+
+/// <summary>
+/// Wallet information exposed via the Greenfield API.
+/// </summary>
+public class ArkWalletData
+{
+    public string WalletId { get; set; } = "";
+    public string WalletType { get; set; } = "";
+    public bool SignerAvailable { get; set; }
+    public bool AllowSubDustAmounts { get; set; }
+    public bool LightningEnabled { get; set; }
+}

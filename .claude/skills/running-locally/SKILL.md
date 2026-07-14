@@ -53,7 +53,7 @@ First launch builds the whole BTCPay solution — allow ~5 minutes before the po
 
 - `http://localhost:14142/login` returns 200 ("Sign in")
 - `http://localhost:14142/api/v1/health` → `{"synchronized":true}`
-- `btcpay-run.log` contains `Running plugin BTCPayServer.Plugins.ArkPayServer`
+- `btcpay-run.log` contains `Running plugin BTCPayServer.Plugins.Boltz.Arkade`
 - First registered user becomes admin (`ALLOW-ADMIN-REGISTRATION` is on)
 
 ## Drive it
@@ -65,7 +65,7 @@ First launch builds the whole BTCPay solution — allow ~5 minutes before the po
 ## Stop / iterate
 
 - Stop BTCPay: kill the `dotnet` process. Restart: same `dotnet run -lp Bitcoin`.
-- After plugin code changes: `dotnet publish BTCPayServer.Plugins.ArkPayServer -c Debug -o BTCPayServer.Plugins.ArkPayServer/bin/Debug/net10.0` (what setup.ps1 does), then restart BTCPay.
+- After plugin code changes: `dotnet publish BTCPayServer.Plugins.Boltz.Arkade -c Debug -o BTCPayServer.Plugins.Boltz.Arkade/bin/Debug/net10.0` (what setup.ps1 does), then restart BTCPay.
 - Stack: `regtest.mjs stop` keeps data; `regtest.mjs clean` wipes volumes.
 
 ## Common mistakes

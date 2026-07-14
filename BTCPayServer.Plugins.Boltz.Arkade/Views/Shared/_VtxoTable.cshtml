@@ -1,0 +1,86 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.Boltz.Arkade.Helpers
+@using NArk.Abstractions.Blockchain
+@using NBitcoin
+@using NArk.Abstractions.VTXOs
+@inject ArkNetworkConfig ArkNetworkConfig
+@inject IBitcoinBlockchain ChainTimeProvider
+@model IEnumerable<ArkVtxo>
+
+@{
+    var chainTime = await ChainTimeProvider.GetChainTime(Context.RequestAborted);
+}
+
+@if (Model.Any())
+{
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th class="text-muted small" text-translate="true">Outpoint</th>
+                    <th class="text-muted small text-end" text-translate="true">Amount</th>
+                    <th class="text-muted small text-end" text-translate="true">Expiry</th>
+                    <th class="text-muted small" text-translate="true">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var vtxo in Model)
+                {
+                    var outpoint = ArkadeLinkHelper.FormatOutpoint(vtxo.TransactionId, vtxo.TransactionOutputIndex);
+                    var link = ArkadeLinkHelper.GetOutpointLink(ArkNetworkConfig, vtxo.TransactionId, vtxo.TransactionOutputIndex);
+                    var showLink = ViewData["ShowLinks"] as bool? ?? true;
+
+                    <tr>
+                        <td>
+                            @if (showLink)
+                            {
+                                <vc:truncate-center link="@link" text="@outpoint" classes="truncate-center-id"/>
+                            }
+                            else
+                            {
+                                <vc:truncate-center text="@outpoint" classes="truncate-center-id"/>
+                            }
+                        </td>
+                        <td class="text-end">
+                            <span class="font-monospace small" data-sensitive>@Money.Satoshis((long)vtxo.Amount).ToDecimal(MoneyUnit.BTC) BTC</span>
+                        </td>
+                        <td class="text-end">
+                            @if (vtxo.ExpiresAt.HasValue)
+                            {
+                                <span class="vtxo-expiry" data-expires="@vtxo.ExpiresAt.Value.ToUnixTimeSeconds()">
+                                    @vtxo.ExpiresAt.Value.ToTimeAgo()
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td class="d-flex flex-wrap gap-1">
+                            @if (vtxo.IsSpent())
+                            {
+                                <span class="badge text-bg-secondary">Spent</span>
+                            }
+                            else if (vtxo.IsUnconfirmedOnchain())
+                            {
+                                <span class="badge text-bg-warning">Unconfirmed</span>
+                            }
+                            else if (vtxo.IsRecoverable(chainTime))
+                            {
+                                <span class="badge text-bg-warning">Recoverable</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-success">Unspent</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else
+{
+    <p class="text-muted mb-0">No VTXOs yet. Receive funds to see them here.</p>
+}
