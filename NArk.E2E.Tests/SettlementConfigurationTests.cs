@@ -69,6 +69,93 @@ public class ArkadePaymentMethodConfigTests
 
         Assert.Null(config.SettlementOptions);
     }
+
+    [Fact]
+    public void SetSettlementOptionData_PreservesNonStringTokenTypes()
+    {
+        var nested = new JObject { ["nestedKey"] = "value" };
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject
+                {
+                    ["name"] = "test",
+                    ["amount"] = 42,
+                    ["enabled"] = true,
+                    ["nested"] = nested
+                });
+
+        var option = Assert.Single(config.SettlementOptions!);
+        Assert.Equal(JTokenType.String, option.AdditionalData!["name"]!.Type);
+        Assert.Equal("test", option.AdditionalData["name"]!.Value<string>());
+        Assert.Equal(JTokenType.Integer, option.AdditionalData["amount"]!.Type);
+        Assert.Equal(42, option.AdditionalData["amount"]!.Value<int>());
+        Assert.Equal(JTokenType.Boolean, option.AdditionalData["enabled"]!.Type);
+        Assert.True(option.AdditionalData["enabled"]!.Value<bool>());
+        Assert.Equal(JTokenType.Object, option.AdditionalData["nested"]!.Type);
+        Assert.Equal("value", option.AdditionalData["nested"]!["nestedKey"]!.Value<string>());
+    }
+
+    [Fact]
+    public void SetSettlementOptionData_PrunesExplicitNullValues()
+    {
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject
+                {
+                    ["thresholdSats"] = "20000",
+                    ["cleared"] = JValue.CreateNull()
+                });
+
+        var option = Assert.Single(config.SettlementOptions!);
+        Assert.Equal("20000", option.GetAdditionalData("thresholdSats"));
+        Assert.False(option.AdditionalData!.ContainsKey("cleared"));
+    }
+
+    [Fact]
+    public void SetSettlementOptionData_RemovesOptionWhenOnlyNullOrBlankValues()
+    {
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject
+                {
+                    ["a"] = "",
+                    ["b"] = "   ",
+                    ["c"] = JValue.CreateNull()
+                });
+
+        Assert.Null(config.SettlementOptions);
+    }
+
+    [Fact]
+    public void SetSettlementOptionData_RoundTripsNonStringPayload()
+    {
+        var nested = new JObject { ["key"] = 99 };
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject
+                {
+                    ["thresholdSats"] = "20000",
+                    ["amount"] = 42,
+                    ["enabled"] = true,
+                    ["nested"] = nested
+                });
+        var serializer = BlobSerializer.CreateSerializer().Serializer;
+
+        var json = JObject.FromObject(config, serializer);
+        var roundTripped = json.ToObject<ArkadePaymentMethodConfig>(serializer);
+
+        var option = Assert.Single(roundTripped!.SettlementOptions!);
+        Assert.Equal(JTokenType.Integer, option.AdditionalData!["amount"]!.Type);
+        Assert.Equal(42, option.AdditionalData["amount"]!.Value<int>());
+        Assert.Equal(JTokenType.Boolean, option.AdditionalData["enabled"]!.Type);
+        Assert.True(option.AdditionalData["enabled"]!.Value<bool>());
+        Assert.Equal(JTokenType.Object, option.AdditionalData["nested"]!.Type);
+        Assert.Equal(99, option.AdditionalData["nested"]!["key"]!.Value<int>());
+    }
 }
 
 [Collection("Arkade Plugin Tests")]

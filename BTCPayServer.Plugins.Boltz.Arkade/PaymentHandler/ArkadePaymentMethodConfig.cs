@@ -20,9 +20,9 @@ public record ArkadePaymentMethodConfig(
             .Where(o => o.Type != optionKey)
             .ToList() ?? [];
 
-        var normalizedData = NormalizeAdditionalData(additionalData);
-        if (normalizedData is not null)
-            settlementOptions.Add(new StoreSettlementOptionConfig(optionKey, normalizedData));
+        var prunedData = PruneEmptyValues(additionalData);
+        if (prunedData is not null)
+            settlementOptions.Add(new StoreSettlementOptionConfig(optionKey, prunedData));
 
         return this with
         {
@@ -30,24 +30,25 @@ public record ArkadePaymentMethodConfig(
         };
     }
 
-    private static JObject? NormalizeAdditionalData(JObject? additionalData)
+    private static JObject? PruneEmptyValues(JObject? additionalData)
     {
         if (additionalData is null)
             return null;
 
-        var normalizedData = new JObject();
+        var prunedData = new JObject();
         foreach (var property in additionalData.Properties())
         {
-            var value = property.Value.Type == JTokenType.String
-                ? property.Value.Value<string>()
-                : null;
-            if (string.IsNullOrWhiteSpace(value))
+            if (property.Value.Type == JTokenType.Null)
                 continue;
 
-            normalizedData[property.Name] = value;
+            if (property.Value.Type == JTokenType.String
+                && string.IsNullOrWhiteSpace(property.Value.Value<string>()))
+                continue;
+
+            prunedData[property.Name] = property.Value;
         }
 
-        return normalizedData.HasValues ? normalizedData : null;
+        return prunedData.HasValues ? prunedData : null;
     }
 }
 
