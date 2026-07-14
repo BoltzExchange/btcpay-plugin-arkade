@@ -2825,16 +2825,23 @@ public class ArkController(
             switch (command)
             {
                 case "refresh-state":
-                    // Look up selected VTXOs to get their scripts, then resolve contracts
+                    // Look up selected VTXOs to get their scripts, then resolve contracts.
+                    // Every resolution is scoped to this store's wallet so user-supplied
+                    // outpoints cannot trigger syncs against another store's objects.
                     var outpoints = selectedItems
                         .Select(s => NBitcoin.OutPoint.Parse(s.Replace('-', ':')))
                         .ToArray();
                     var selectedVtxos = await vtxoStorage.GetVtxos(
+                        walletIds: [config!.WalletId!],
                         outpoints: outpoints, includeSpent: true, cancellationToken: cancellationToken);
                     var vtxoScripts = selectedVtxos.Select(v => v.Script).Distinct().ToArray();
+                    // Contract identity is (walletId, script) — the same script can exist under
+                    // another wallet, so the contract lookups need the wallet filter too.
                     var boardingContracts = await contractStorage.GetContracts(
+                        walletIds: [config.WalletId!],
                         scripts: vtxoScripts, scope: ContractScope.Onchain, cancellationToken: cancellationToken);
                     var nonBoardingScripts = (await contractStorage.GetContracts(
+                            walletIds: [config.WalletId!],
                             scripts: vtxoScripts, scope: ContractScope.Offchain, cancellationToken: cancellationToken))
                         .Select(c => c.Script).ToHashSet();
                     if (nonBoardingScripts.Count > 0)
@@ -2922,10 +2929,14 @@ public class ArkController(
             switch (command)
             {
                 case "sync-selected":
-                    // Poll scripts for VTXO updates, routing boarding contracts to UTXO provider
+                    // Poll scripts for VTXO updates, routing boarding contracts to UTXO provider.
+                    // Scoped to this store's wallet so user-supplied scripts cannot trigger
+                    // syncs against another store's contracts.
                     var selectedBoarding = await contractStorage.GetContracts(
+                        walletIds: [config!.WalletId!],
                         scripts: selectedItems, scope: ContractScope.Onchain, cancellationToken: cancellationToken);
                     var selectedNonBoardingScripts = (await contractStorage.GetContracts(
+                            walletIds: [config.WalletId!],
                             scripts: selectedItems, scope: ContractScope.Offchain, cancellationToken: cancellationToken))
                         .Select(c => c.Script).ToHashSet();
                     if (selectedNonBoardingScripts.Count > 0)
