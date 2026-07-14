@@ -24,14 +24,6 @@ if (-not (Test-Path Env:CI)) {
     }
 }
 
-# Create appsettings file to include app plugin when running the server
-$appsettings = "submodules/btcpayserver/BTCPayServer/appsettings.dev.json"
-if (-not (Test-Path $appsettings -PathType Leaf)) {
-    Write-Host "Creating $appsettings..."
-    $content = '{ "DEBUG_PLUGINS": "../../../BTCPayServer.Plugins.Boltz.Arkade/bin/Debug/net10.0/BTCPayServer.Plugins.Boltz.Arkade.dll" }'
-    Set-Content -Path $appsettings -Value $content -Encoding UTF8
-}
-
 # Publish plugin (NNark dependencies are included via ProjectReferences)
 $root = Get-Location
 $pluginDir = "BTCPayServer.Plugins.Boltz.Arkade"
@@ -47,6 +39,15 @@ Write-Host "Publishing plugin (includes NNark dependencies)..."
 dotnet publish $pluginDir -c Debug -o $publishDir
 if ($LASTEXITCODE -ne 0) {
     Write-Error "dotnet publish failed."
+    exit 1
+}
+
+# Register the plugin with the dev server (and the E2E test bin, if built)
+# via DEBUG_PLUGINS in appsettings.dev.json — same as `make appsettings`.
+Write-Host "Writing appsettings.dev.json via ConfigBuilder..."
+dotnet run --project ConfigBuilder/ConfigBuilder.csproj
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "ConfigBuilder failed."
     exit 1
 }
 

@@ -19,12 +19,15 @@ target **.NET 8**.
   library projects it references.
 
 ## Setup
-Run `./setup.sh` (or `./setup.ps1` on Windows) after cloning: it initialises
-submodules, restores .NET workloads, registers the plugin with the dev server
-via `DEBUG_PLUGINS` in `submodules/btcpayserver/BTCPayServer/appsettings.dev.json`,
-and publishes the plugin (NNark dependencies included). Use
-`./add-migration.sh <Name>` to add EF Core migrations, and `start-test-env.cmd`
-to bring up the local regtest/Arkade test environment.
+Run `make setup` after cloning: it initialises submodules, restores .NET
+workloads, publishes the plugin (NNark dependencies included), and registers
+it with the dev server via `DEBUG_PLUGINS` in
+`submodules/btcpayserver/BTCPayServer/appsettings.dev.json` (written by
+`ConfigBuilder`). Use `make migration NAME=<Name>` to add EF Core migrations,
+`make regtest` to bring up the local regtest/Arkade test environment, and
+`make test` to run the E2E suite against it. Releases are cut with
+`make gh-release` (see `docs/release-process.md`). Windows equivalents:
+`setup.ps1`, `add-migration.ps1`, and `start-test-env.cmd`.
 
 To run the app locally (regtest stack + BTCPay with the plugin + smoke
 checks), follow the verified recipe in
