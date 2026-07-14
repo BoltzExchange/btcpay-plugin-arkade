@@ -118,7 +118,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
     {
         services.AddArkEfCoreStorage<ArkPluginDbContext>(opts =>
         {
-            opts.Schema = "BTCPayServer.Plugins.Ark";
+            opts.Schema = "BTCPayServer.Plugins.Boltz.Arkade";
             opts.ContractSearchProvider = (query, searchText) =>
             {
                 var pattern = $"%{searchText}%";
