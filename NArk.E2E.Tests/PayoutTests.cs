@@ -1,6 +1,8 @@
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using Microsoft.Playwright;
+using NArk.Swaps.Models;
+using NArk.Tests.End2End.Common;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -191,11 +193,23 @@ public class PayoutTests : PlaywrightBaseTest
             $"expected the chain-swap payout to be InProgress (or Completed after settlement), got {settling.State}");
         Assert.NotNull(settling.PaymentProof);
 
-        // The processor settles a bitcoin destination via an ARK→BTC chain swap.
-        await WaitForChainSwapAsync(
+        // Completion: the chain swap settles, the settlement listener finishes the payout,
+        // and BTC actually arrives at the destination.
+        await WaitForSwapAsync(
             _fixture.ServerTester!.PayTester.ServiceProvider,
             walletId!,
-            TimeSpan.FromMinutes(1));
+            ArkSwapType.ChainArkToBtc,
+            [ArkSwapStatus.Settled],
+            TimeSpan.FromMinutes(3),
+            mineWhileWaiting: true);
+
+        var completed = await PollPayoutStateAsync(
+            client, storeId, payout.Id, [PayoutState.Completed], TimeSpan.FromMinutes(2));
+        Assert.Equal(PayoutState.Completed, completed.State);
+
+        var receivedSats = await DockerHelper.BitcoinGetReceivedByAddressSats(bitcoinAddress, minConf: 0);
+        Assert.True(receivedSats > 0,
+            $"payout chain swap settled but no BTC arrived at {bitcoinAddress}");
     }
 
     // --- helpers ---
@@ -233,7 +247,7 @@ public class PayoutTests : PlaywrightBaseTest
             latest = await client.GetStorePayout(storeId, payoutId);
             if (expected.Contains(latest.State))
                 return latest;
-            await Task.Delay(2_000);
+            await Task.Delay(500);
         }
         return latest ?? await client.GetStorePayout(storeId, payoutId);
     }

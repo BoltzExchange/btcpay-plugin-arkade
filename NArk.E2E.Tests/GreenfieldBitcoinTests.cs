@@ -1,6 +1,8 @@
 using System.Text;
 using BTCPayServer.Client;
 using Microsoft.Playwright;
+using NArk.Swaps.Models;
+using NArk.Tests.End2End.Common;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -90,12 +92,20 @@ public class GreenfieldBitcoinTests : PlaywrightBaseTest
                     $"The BIP21 send remained reserved by active intents: {sendError}");
             }
 
-            await Task.Delay(3_000);
+            await Task.Delay(500);
         }
 
-        await WaitForChainSwapAsync(
+        // Completion, not just initiation: the swap settles and BTC lands at the destination.
+        await WaitForSwapAsync(
             _fixture.ServerTester!.PayTester.ServiceProvider,
             walletId!,
-            TimeSpan.FromMinutes(1));
+            ArkSwapType.ChainArkToBtc,
+            [ArkSwapStatus.Settled],
+            TimeSpan.FromMinutes(3),
+            mineWhileWaiting: true);
+
+        var receivedSats = await DockerHelper.BitcoinGetReceivedByAddressSats(bitcoinAddress, minConf: 0);
+        Assert.True(receivedSats > 0,
+            $"chain swap settled but no BTC arrived at {bitcoinAddress}");
     }
 }

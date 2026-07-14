@@ -7,6 +7,7 @@ using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using BTCPayServer.Tests;
+using System.Text;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
@@ -360,6 +361,8 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                         $"stderr={settleResult.StandardError.Trim()}, " +
                         $"stdout={settleResult.StandardOutput.Trim()}");
 
+                // Genuine settling window (one-time suite setup, usually skipped):
+                // arkd has no observable "funding indexed" signal, only the settle retry.
                 await Task.Delay(TimeSpan.FromSeconds(2));
                 await Cli.Wrap("docker")
                     .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "1" })
@@ -410,6 +413,80 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         var locator = Page.Locator("input[name='__RequestVerificationToken']").First;
         if (await locator.CountAsync() == 0) return null;
         return await locator.GetAttributeAsync("value");
+    }
+
+    /// <summary>
+    /// POSTs a form to the store's <c>/plugins/ark/stores/{storeId}/{action}</c> endpoint,
+    /// using the overview page's antiforgery token.
+    /// </summary>
+    protected async Task<IAPIResponse> PostPluginFormAsync(string storeId, string action, string formData = "")
+    {
+        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
+        var token = (await GetAntiforgeryTokenAsync()) ?? "";
+        return await Page!.Context.APIRequest.PostAsync(
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/{action}").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["RequestVerificationToken"] = token,
+                    ["Content-Type"] = "application/x-www-form-urlencoded"
+                },
+                Data = formData
+            });
+    }
+
+    /// <summary>Reads the store's Greenfield arkade balance.</summary>
+    protected async Task<(long AvailableSats, long BoardingSats)> GetArkadeBalanceAsync(string storeId)
+    {
+        var authHeader = $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes($"{CreatedUser}:{Password}"))}";
+        var resp = await Page!.Context.APIRequest.GetAsync(
+            new Uri(ServerUri!, $"/api/v1/stores/{storeId}/arkade/balance").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string> { ["Authorization"] = authHeader }
+            });
+        Assert.True(resp.Ok, $"balance returned {resp.Status}");
+        using var doc = JsonDocument.Parse(await resp.TextAsync());
+        return (doc.RootElement.GetProperty("availableSats").GetInt64(),
+                doc.RootElement.GetProperty("boardingSats").GetInt64());
+    }
+
+    /// <summary>
+    /// Default wait between poll attempts. The conditions polled by these tests hit
+    /// local HTTP/DB endpoints where an attempt costs milliseconds, so a tight
+    /// interval buys latency without meaningful load. Timeout CEILINGS stay generous —
+    /// they only cost time on failure.
+    /// </summary>
+    protected static readonly TimeSpan DefaultPollInterval = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>Polls <paramref name="condition"/> until it returns true, failing the test at the deadline.</summary>
+    protected static Task PollUntilAsync(
+        Func<Task<bool>> condition, TimeSpan timeout, string failMessage, TimeSpan? interval = null)
+        => PollUntilAsync(condition, timeout, () => failMessage, interval);
+
+    protected static async Task PollUntilAsync(
+        Func<Task<bool>> condition, TimeSpan timeout, Func<string> failMessage, TimeSpan? interval = null)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (!await condition())
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+                Assert.Fail(failMessage());
+            await Task.Delay(interval ?? DefaultPollInterval);
+        }
+    }
+
+    /// <summary>Polls Greenfield until the invoice reaches Settled.</summary>
+    protected static async Task WaitForInvoiceSettledAsync(
+        BTCPayServerClient client, string storeId, string invoiceId, TimeSpan timeout)
+    {
+        InvoiceStatus? last = null;
+        await PollUntilAsync(async () =>
+        {
+            last = (await client.GetInvoice(storeId, invoiceId)).Status;
+            return last == InvoiceStatus.Settled;
+        }, timeout, () => $"invoice {invoiceId} never settled (last status: {last})");
     }
 
     protected async Task PayArkadeInvoiceAsync(
@@ -463,22 +540,67 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         IServiceProvider services,
         string walletId,
         TimeSpan? timeout = null)
+        => await WaitForSwapAsync(services, walletId, ArkSwapType.ChainArkToBtc,
+            wantedStatuses: null, timeout ?? TimeSpan.FromMinutes(1));
+
+    /// <summary>
+    /// Polls swap storage until a swap of <paramref name="type"/> for the wallet reaches one
+    /// of <paramref name="wantedStatuses"/> (any status when null), failing fast when it lands
+    /// on an unwanted terminal status. <paramref name="mineWhileWaiting"/> nudges the regtest
+    /// chain along for swaps that wait on a lockup confirmation.
+    /// </summary>
+    protected static async Task<ArkSwap> WaitForSwapAsync(
+        IServiceProvider services,
+        string walletId,
+        ArkSwapType type,
+        ArkSwapStatus[]? wantedStatuses,
+        TimeSpan timeout,
+        bool mineWhileWaiting = false)
     {
         var swapStorage = services.GetRequiredService<ISwapStorage>();
-        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromMinutes(1));
+        var terminal = new[] { ArkSwapStatus.Settled, ArkSwapStatus.Failed, ArkSwapStatus.Refunded };
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        var nextMineAt = DateTimeOffset.MinValue;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var swap = (await swapStorage.GetSwaps(
-                    walletIds: [walletId],
-                    swapTypes: [ArkSwapType.ChainArkToBtc]))
-                .FirstOrDefault(s => s.ExpectedAmount > 0);
-            if (swap is not null)
-                return swap;
+            var swaps = await swapStorage.GetSwaps(
+                walletIds: [walletId],
+                swapTypes: [type]);
+            var candidates = swaps.Where(s => s.ExpectedAmount > 0).ToArray();
 
-            await Task.Delay(2_000);
+            if (wantedStatuses is null)
+            {
+                if (candidates.Length > 0)
+                    return candidates[0];
+            }
+            else
+            {
+                var hit = candidates.FirstOrDefault(s => wantedStatuses.Contains(s.Status));
+                if (hit is not null)
+                    return hit;
+
+                var unexpectedTerminal = candidates.FirstOrDefault(s =>
+                    terminal.Contains(s.Status) && !wantedStatuses.Contains(s.Status));
+                if (unexpectedTerminal is not null)
+                    throw new InvalidOperationException(
+                        $"Swap {unexpectedTerminal.SwapId} reached {unexpectedTerminal.Status} " +
+                        $"(wanted {string.Join("/", wantedStatuses)}): {unexpectedTerminal.FailReason}");
+            }
+
+            // Poll the storage fast, but keep the block cadence at the previous
+            // 1-block-per-2s rhythm — the chain only needs an occasional nudge.
+            if (mineWhileWaiting && DateTimeOffset.UtcNow >= nextMineAt)
+            {
+                await DockerHelper.MineBlocks(1);
+                nextMineAt = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2);
+            }
+
+            await Task.Delay(DefaultPollInterval);
         }
 
-        throw new TimeoutException($"No ChainArkToBtc swap was recorded for wallet {walletId}.");
+        throw new TimeoutException(
+            $"No {type} swap{(wantedStatuses is null ? "" : $" with status {string.Join("/", wantedStatuses)}")} " +
+            $"was recorded for wallet {walletId} within {timeout}.");
     }
 
     /// <summary>Generates a receive address directly from the in-process test host.</summary>
@@ -574,7 +696,9 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
             var locator = Page.Locator(selector).First;
             if (await locator.CountAsync() > 0 && await locator.IsVisibleAsync())
                 return;
-            await Task.Delay(3_000);
+            // Each attempt already costs a full page load, which self-throttles on
+            // slower runners; the extra delay only needs to yield, not pace.
+            await Task.Delay(DefaultPollInterval);
         }
         throw new TimeoutException($"Selector {selector} was not visible on {relativeUrl}.");
     }
@@ -610,7 +734,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
             {
                 lastError = ex.Message;
             }
-            await Task.Delay(3_000);
+            await Task.Delay(DefaultPollInterval);
         }
         throw new TimeoutException(
             $"Store {storeId} had no spendable coins within the wait window (last: {lastError ?? "empty selection"}).");

@@ -81,7 +81,7 @@ public class OverviewActivityTests : PlaywrightBaseTest
 
             if (DateTimeOffset.UtcNow > sendDeadline)
                 throw new TimeoutException("Send kept failing; coins were never spendable long enough.");
-            await Task.Delay(3_000);
+            await Task.Delay(500);
             outpoints = await PollForSpendableCoinsAsync(
                 senderStoreId, "ArkAddress", 40_000, TimeSpan.FromMinutes(1));
         }
@@ -119,7 +119,8 @@ public class OverviewActivityTests : PlaywrightBaseTest
             if (DateTimeOffset.UtcNow > deadline)
                 throw new TimeoutException(
                     "Boarding activity entry did not appear after funding the boarding address.");
-            await Task.Delay(3_000);
+            // Each round already costs a sync round-trip plus a page load.
+            await Task.Delay(500);
         }
     }
 

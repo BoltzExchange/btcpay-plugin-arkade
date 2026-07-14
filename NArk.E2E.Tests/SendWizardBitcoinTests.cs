@@ -140,7 +140,7 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
                 await Page.Locator(".coin-checkbox:checked").CountAsync() > 0)
                 return;
 
-            await Task.Delay(3_000);
+            await Task.Delay(500);
         }
 
         throw new TimeoutException($"The send wizard never rendered spendable coins for store {storeId}.");
