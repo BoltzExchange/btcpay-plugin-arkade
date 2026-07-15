@@ -15,6 +15,7 @@ using BTCPayServer.Plugins.Boltz.Arkade.Services;
 using BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement;
 using BTCPayServer.Plugins.Boltz.Arkade.Services.WalletLogger;
 using BTCPayServer.Services.Notifications;
+using BTCPayServer.Services.Reporting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -104,6 +105,22 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddDefaultPrettyName(ArkadePaymentMethodId, "Arkade");
 
         services.AddSingleton<INotificationHandler, ArkadeDestinationDisabledNotification.Handler>();
+
+        services.AddSingleton<ArkadeSettlementDataProvider>();
+        ReplacePaymentsReportProvider(services);
+    }
+
+    private static void ReplacePaymentsReportProvider(IServiceCollection services)
+    {
+        var defaultPaymentsReportProvider = services.LastOrDefault(descriptor =>
+            descriptor.ServiceType == typeof(ReportProvider) &&
+            descriptor.ImplementationType == typeof(PaymentsReportProvider));
+        if (defaultPaymentsReportProvider is not null)
+        {
+            services.Remove(defaultPaymentsReportProvider);
+        }
+
+        services.AddReportProvider<ArkadePaymentsReportProvider>();
     }
 
     private static void RegisterDatabase(IServiceCollection services)

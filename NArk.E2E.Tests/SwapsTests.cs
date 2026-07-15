@@ -1,5 +1,7 @@
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Plugins.Boltz.Arkade.Services;
+using BTCPayServer.Services.Reporting;
 using Microsoft.Extensions.DependencyInjection;
 using NArk.Swaps.Abstractions;
 using NArk.Swaps.Models;
@@ -178,6 +180,75 @@ public class SwapsTests : PlaywrightBaseTest
 
         // …and the BTCPay invoice must settle through the arkade Lightning listener.
         await WaitForInvoiceSettledAsync(client, storeId, invoiceId, TimeSpan.FromMinutes(2));
+
+        // The Payments report must export the swap's settlement details alongside the payment.
+        var settledSwap = Assert.Single(await swapStorage.GetSwaps(
+            walletIds: [walletId!],
+            swapTypes: [ArkSwapType.ReverseSubmarine],
+            invoices: [bolt11!]));
+
+        IList<object?>? row = null;
+        List<string> fields = [];
+        await PollUntilAsync(async () =>
+        {
+            (fields, var rows) = await QueryPaymentsReportAsync(storeId);
+            row = rows.FirstOrDefault(r => Equals(r[fields.IndexOf("InvoiceId")], invoiceId));
+            return row is not null &&
+                   !string.IsNullOrWhiteSpace(row[fields.IndexOf("SettlementTransactionId")] as string);
+        }, TimeSpan.FromMinutes(1), "payments report never exported the swap settlement details");
+
+        Assert.Equal("Lightning via Boltz", row![fields.IndexOf("Category")]);
+        Assert.Equal(settledSwap.SwapId, row[fields.IndexOf("BoltzSwapId")]);
+        Assert.Equal("BTC", row[fields.IndexOf("SettlementCurrency")]);
+        Assert.Equal(settledSwap.Address, row[fields.IndexOf("SettlementAddress")]);
+    }
+
+    /// <summary>
+    /// Direct Arkade payments must show up in the Payments report with the Arkade
+    /// category and the transaction that created the VTXO on the invoice's contract.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task PaymentsReport_IncludesArkadePaymentDetails()
+    {
+        _fixture.Initialize(this);
+        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
+
+        var storeId = await CreateStoreWithArkWalletAsync();
+        var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
+        var invoiceId = await PayArkadeInvoiceAsync(client, storeId, 50_000);
+
+        IList<object?>? row = null;
+        List<string> fields = [];
+        await PollUntilAsync(async () =>
+        {
+            (fields, var rows) = await QueryPaymentsReportAsync(storeId);
+            row = rows.FirstOrDefault(r => Equals(r[fields.IndexOf("InvoiceId")], invoiceId));
+            return row is not null;
+        }, TimeSpan.FromMinutes(2), "payments report never showed the Arkade payment");
+
+        Assert.Equal("Arkade", row![fields.IndexOf("Category")]);
+        Assert.Equal("ARKADE", row[fields.IndexOf("PaymentMethodId")]);
+        Assert.False(string.IsNullOrWhiteSpace(row[fields.IndexOf("Address")] as string));
+        Assert.False(string.IsNullOrWhiteSpace(row[fields.IndexOf("SettlementTransactionId")] as string));
+    }
+
+    /// <summary>
+    /// Runs the Payments report for the store through the plugin's provider, asserting on the
+    /// way that it replaced BTCPay's default provider rather than being registered alongside it.
+    /// </summary>
+    private async Task<(List<string> Fields, IList<IList<object?>> Rows)> QueryPaymentsReportAsync(string storeId)
+    {
+        var provider = Assert.Single(_fixture.ServerTester!.PayTester.ServiceProvider
+            .GetServices<ReportProvider>()
+            .Where(p => p.Name == "Payments"));
+        // Compare by name: BTCPay loads the plugin assembly in its own context, so the
+        // provider's CLR type is distinct from the test project's compile-time reference.
+        Assert.Equal(typeof(ArkadePaymentsReportProvider).FullName, provider.GetType().FullName);
+
+        var queryContext = new QueryContext(storeId, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        await provider.Query(queryContext, CancellationToken.None);
+        return (queryContext.ViewDefinition!.Fields.Select(f => f.Name).ToList(), queryContext.Data);
     }
 
     /// <summary>

@@ -489,7 +489,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         }, timeout, () => $"invoice {invoiceId} never settled (last status: {last})");
     }
 
-    protected async Task PayArkadeInvoiceAsync(
+    protected async Task<string> PayArkadeInvoiceAsync(
         BTCPayServerClient client,
         string storeId,
         long amountSats)
@@ -522,6 +522,8 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         var payBody = await payResp.TextAsync();
         Assert.True(payResp.Ok,
             $"POST /i/{invoice.Id}/test-payment returned {payResp.Status}: {payBody}");
+
+        return invoice.Id;
     }
 
     protected static async Task<string> GetNewRegtestBitcoinAddressAsync()
