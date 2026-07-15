@@ -418,13 +418,18 @@ public class ArkController(
             var lightningSwaps = db.Swaps
                 .Where(s => s.WalletId == config.WalletId! && lightningSwapTypes.Contains(s.SwapType));
 
-            pendingLightningSwapCount = await lightningSwaps
-                .CountAsync(s => s.Status == ArkSwapStatus.Pending || s.Status == ArkSwapStatus.Unknown, cancellationToken);
+            // A reverse swap exists from the moment its Lightning invoice is created, but it
+            // only becomes payment activity once Boltz locks up funds for it — i.e. a VTXO
+            // exists on the swap's contract script. Without that, it is just an unpaid invoice.
+            var pendingLightningSwaps = lightningSwaps
+                .Where(s => s.Status == ArkSwapStatus.Pending || s.Status == ArkSwapStatus.Unknown);
+            pendingLightningSwapCount = await pendingLightningSwaps
+                .CountAsync(s => s.SwapType == ArkSwapType.Submarine ||
+                                 db.Vtxos.Any(v => v.Script == s.ContractScript), cancellationToken);
 
-            var visibleLightningSwaps = await lightningSwaps
+            var visibleLightningSwaps = await pendingLightningSwaps
                 .Where(s => s.SwapType == ArkSwapType.ReverseSubmarine &&
-                            (s.Status == ArkSwapStatus.Pending ||
-                             s.Status == ArkSwapStatus.Unknown))
+                            db.Vtxos.Any(v => v.Script == s.ContractScript))
                 .OrderByDescending(s => s.UpdatedAt)
                 .Take(5)
                 .ToListAsync(cancellationToken);
