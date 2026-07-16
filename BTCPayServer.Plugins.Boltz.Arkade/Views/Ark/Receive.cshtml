@@ -8,7 +8,7 @@
     var storeId = ScopeProvider.GetCurrentStoreId();
     var returnUrl = Url.Action("StoreOverview", "Ark", new { storeId });
     Layout = "_LayoutWizard";
-    ViewData.SetTitle("Receive Arkade");
+    ViewData.SetTitle("Receive");
     var hasAddress = !string.IsNullOrEmpty(Model.Address);
     var hasBoarding = !string.IsNullOrEmpty(Model.BoardingAddress);
     var hasAny = hasAddress || hasBoarding;
@@ -35,16 +35,9 @@
     @if (!hasAny)
     {
         <div class="payment-box mb-3">
-            <button id="generateButton" class="btn btn-primary w-100" type="submit" name="command" value="generate-address">
+            <button id="generateButton" class="btn btn-primary w-100" type="submit" name="command" value="generate">
                 Generate receive address
             </button>
-            <p class="text-muted small text-center mt-2 mb-0">Instant offchain Arkade payments</p>
-        </div>
-        <div class="payment-box mb-3">
-            <button class="btn btn-outline-primary w-100" type="submit" name="command" value="generate-boarding-address">
-                Generate boarding address
-            </button>
-            <p class="text-muted small text-center mt-2 mb-0">Onchain Bitcoin deposit into Arkade</p>
         </div>
     }
     else
@@ -78,8 +71,8 @@
         <div class="nav flex-wrap align-items-center justify-content-center gap-2 mb-4">
             @if (hasAddress)
             {
-                <a class="btcpay-pill" data-bs-toggle="tab" href="#address-tab">Address</a>
                 <a class="btcpay-pill active" data-bs-toggle="tab" href="#link-tab">Link</a>
+                <a class="btcpay-pill" data-bs-toggle="tab" href="#address-tab">Arkade</a>
             }
             @if (hasBoarding)
             {
@@ -90,17 +83,6 @@
             <div class="tab-content text-center">
                 @if (hasAddress)
                 {
-                    <div class="tab-pane payment-box" id="address-tab" role="tabpanel">
-                        <div class="qr-container" data-clipboard="@Model.Address">
-                            <vc:qr-code data="@Model.Address" />
-                        </div>
-                        <div class="input-group mt-3">
-                            <div class="form-floating">
-                                <vc:truncate-center text="@Model.Address" padding="15" elastic="true" classes="form-control-plaintext" id="Address" />
-                                <label for="Address">Arkade Address</label>
-                            </div>
-                        </div>
-                    </div>
                     <div class="tab-pane payment-box show active" id="link-tab" role="tabpanel">
                         <div class="qr-container" data-clipboard="@paymentLink">
                             <vc:qr-code data="@paymentLink" />
@@ -109,6 +91,17 @@
                             <div class="form-floating">
                                 <vc:truncate-center text="@paymentLink" padding="15" elastic="true" classes="form-control-plaintext" id="PaymentLink" />
                                 <label for="PaymentLink">Payment Link</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-pane payment-box" id="address-tab" role="tabpanel">
+                        <div class="qr-container" data-clipboard="@Model.Address">
+                            <vc:qr-code data="@Model.Address" />
+                        </div>
+                        <div class="input-group mt-3">
+                            <div class="form-floating">
+                                <vc:truncate-center text="@Model.Address" padding="15" elastic="true" classes="form-control-plaintext" id="Address" />
+                                <label for="Address">Arkade Address</label>
                             </div>
                         </div>
                     </div>
@@ -130,18 +123,9 @@
                 }
             </div>
         </div>
-        <div class="mt-2 d-flex flex-column align-items-center">
-            @* "New X" is a refresh action once the address already exists, so a
-               quiet text button is the right visual weight; "Generate X" stays
-               a prominent CTA when that address is still missing. Stacked
-               vertically with minimal padding so each label fits on one line. *@
-            <button type="submit" name="command" value="generate-address"
-                    class="btn @(hasAddress ? "btn-link py-1" : "btn-primary")">
-                @(hasAddress ? "New Arkade address" : "Generate Arkade address")
-            </button>
-            <button type="submit" name="command" value="generate-boarding-address"
-                    class="btn @(hasBoarding ? "btn-link py-1" : "btn-outline-primary")">
-                @(hasBoarding ? "New boarding address" : "Generate boarding address")
+        <div class="payment-box mt-4">
+            <button type="submit" name="command" value="generate" class="btn btn-primary w-100">
+                Generate another address
             </button>
         </div>
         <p class="text-muted small text-center mt-3 mb-0">Addresses auto-deactivate once funds arrive</p>

@@ -78,13 +78,17 @@
     </style>
 }
 
-<div class="sticky-header">
-    <h2>
+<div class="d-sm-flex align-items-center justify-content-between gap-3 mb-4">
+    <h2 class="mb-1">
         <span>@ViewData["Title"]</span>
         <a href="#descriptor" data-bs-toggle="collapse">
             <vc:icon symbol="info" />
         </a>
     </h2>
+    <a asp-action="StoreOverview" asp-route-storeId="@storeId" class="btn btn-secondary mt-3 mt-sm-0">
+        <vc:icon symbol="caret-left" />
+        Overview
+    </a>
 </div>
 
 <div id="descriptor" class="collapse">

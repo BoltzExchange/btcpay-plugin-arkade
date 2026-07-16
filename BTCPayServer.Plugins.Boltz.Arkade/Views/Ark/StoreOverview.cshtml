@@ -4,7 +4,6 @@
 @using BTCPayServer.Plugins.Boltz.Arkade.Models
 @using BTCPayServer.Plugins.Boltz.Arkade.Services
 @using BTCPayServer.Services
-@using NArk.Abstractions.Wallets
 @using NArk.Swaps.Models
 @model BTCPayServer.Plugins.Boltz.Arkade.Models.StoreOverviewViewModel
 @inject DisplayFormatter DisplayFormatter
@@ -105,20 +104,6 @@
                         Rescan wallet
                     </button>
                 </form>
-                @if (Model.SignerAvailable && Model.HasSecret && Model.WalletType == WalletType.HD)
-                {
-                    <form method="post" asp-controller="Ark" asp-action="ShowPrivateKey" asp-route-storeId="@storeId">
-                        <button type="submit" class="dropdown-item" data-testid="show-private-key-btn">
-                            Show seed
-                        </button>
-                    </form>
-                }
-                <a asp-action="DownloadWalletLog" asp-route-storeId="@storeId"
-                   class="dropdown-item"
-                   title="Download this wallet's diagnostic log to share with support"
-                   data-testid="download-wallet-log-btn">
-                    Download diagnostic log
-                </a>
                 <button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#clearWalletModal" data-testid="clear-wallet-btn">
                     Clear wallet
                 </button>
