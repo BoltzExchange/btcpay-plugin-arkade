@@ -34,7 +34,9 @@ public class BoardingLifecycleTests : PlaywrightBaseTest
         var storeId = await CreateStoreWithArkWalletAsync();
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/receive");
-        await Page!.ClickAsync("button[name='command'][value='generate-boarding-address']");
+        await Page!.ClickAsync("button[name='command'][value='generate']");
+        // The Link (BIP21) tab is active by default; the boarding address lives in its own tab.
+        await Page.ClickAsync("a[href='#boarding-tab']");
         await Page.WaitForSelectorAsync("#BoardingAddress",
             new PageWaitForSelectorOptions { Timeout = 30_000 });
         var boardingAddress = (await Page.Locator("#BoardingAddress").GetAttributeAsync("data-text"))

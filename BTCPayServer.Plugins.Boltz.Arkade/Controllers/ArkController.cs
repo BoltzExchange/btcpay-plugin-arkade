@@ -676,34 +676,21 @@ public class ArkController(
             var model = new ArkReceiveViewModel();
             var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
 
-            if (command == "generate-boarding-address")
-            {
-                var boardingContract = (ArkBoardingContract)await contractService.DeriveContract(
-                    config!.WalletId!,
-                    NextContractPurpose.Boarding,
-                    ContractActivityState.AwaitingFundsBeforeDeactivate,
-                    metadata: new Dictionary<string, string> { ["Source"] = "manual" },
-                    cancellationToken: cancellationToken);
-                model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
+            var contract = await contractService.DeriveContract(
+                config!.WalletId!,
+                NextContractPurpose.Receive,
+                ContractActivityState.AwaitingFundsBeforeDeactivate,
+                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
+                cancellationToken: cancellationToken);
+            model.Address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
 
-                // Preserve existing ark address if any
-                var existingAddress = await walletService.FindManualReceiveAddress(config.WalletId!, cancellationToken);
-                if (existingAddress != null) model.Address = existingAddress;
-            }
-            else
-            {
-                var contract = await contractService.DeriveContract(
-                    config!.WalletId!,
-                    NextContractPurpose.Receive,
-                    ContractActivityState.AwaitingFundsBeforeDeactivate,
-                    metadata: new Dictionary<string, string> { ["Source"] = "manual" },
-                    cancellationToken: cancellationToken);
-                model.Address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
-
-                // Preserve existing boarding address if any
-                var existingBoarding = await walletService.FindManualBoardingAddress(config.WalletId!, cancellationToken);
-                if (existingBoarding != null) model.BoardingAddress = existingBoarding;
-            }
+            var boardingContract = (ArkBoardingContract)await contractService.DeriveContract(
+                config.WalletId!,
+                NextContractPurpose.Boarding,
+                ContractActivityState.AwaitingFundsBeforeDeactivate,
+                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
+                cancellationToken: cancellationToken);
+            model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
 
             return View(model);
         }

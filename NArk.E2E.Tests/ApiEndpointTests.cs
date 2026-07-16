@@ -171,7 +171,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
     /// in a <c>data-mnemonic</c> attribute. We don't follow the redirect
     /// via APIRequest (the controller uses TempData which only persists
     /// across cookie-bound page navigations); instead we POST the form
-    /// from the overview page and let Playwright handle the redirect.
+    /// from the settings page and let Playwright handle the redirect.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
@@ -182,7 +182,7 @@ public class ApiEndpointTests : PlaywrightBaseTest
 
         var expectedMnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
         var storeId = await CreateStoreWithArkWalletAsync(expectedMnemonic);
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
+        await GoToUrl($"/plugins/ark/stores/{storeId}/settings");
 
         // The Show Private Key form submits via JS — we submit the same
         // form by element click. After submission the page lands on
