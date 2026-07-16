@@ -46,7 +46,7 @@ public class StoreOverviewViewModelTests
             ],
             PaymentStats =
             [
-                new StoreOverviewStatViewModel { Name = "Recent volume", Value = 50_000 }
+                new StoreOverviewStatViewModel { Name = "Total volume", Value = 50_000 }
             ]
         };
 

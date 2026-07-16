@@ -89,6 +89,7 @@ public class ArkController(
     IVtxoStorage vtxoStorage,
     IWalletStorage walletStorage,
     IDbContextFactory<ArkPluginDbContext> dbContextFactory,
+    ApplicationDbContextFactory applicationDbContextFactory,
     IHttpClientFactory httpClientFactory,
     BoardingUtxoSyncService boardingUtxoSyncService,
     IWalletLogStore walletLogStore,
@@ -331,7 +332,8 @@ public class ArkController(
         var (boltzConnected, boltzError, boltzLimits) = await GetBoltzConnectionStatusAsync(cancellationToken);
 
         var recentPayments = new List<RecentPaymentViewModel>();
-        var receivedVolumeSats = 0L;
+        var totalVolumeSats = 0L;
+        var totalPaymentCount = 0;
         var processingPaymentCount = 0;
         var lightningPaymentMethod = GetLightningPaymentMethod();
         var lnurlPaymentMethod = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
@@ -341,6 +343,37 @@ public class ArkController(
             lightningPaymentMethod,
             lnurlPaymentMethod
         };
+
+        try
+        {
+            // All-time stats are aggregated in SQL; only the recent-activity list below
+            // loads invoice entities.
+            var paymentMethodIds = paymentMethods.Select(m => m.ToString()).ToArray();
+            await using var appDb = applicationDbContextFactory.CreateContext();
+            var paymentTotals = await appDb.Payments
+                .Where(p => p.InvoiceData.StoreDataId == store!.Id &&
+                            !p.InvoiceData.Archived &&
+                            paymentMethodIds.Contains(p.PaymentMethodId) &&
+                            (p.Status == PaymentStatus.Settled || p.Status == PaymentStatus.Processing))
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Count = g.Count(),
+                    VolumeCoins = g.Sum(p => p.Amount) ?? 0m,
+                    Processing = g.Count(p => p.Status == PaymentStatus.Processing)
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (paymentTotals != null)
+            {
+                totalPaymentCount = paymentTotals.Count;
+                totalVolumeSats = Money.Coins(paymentTotals.VolumeCoins).Satoshi;
+                processingPaymentCount = paymentTotals.Processing;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to load all-time payment stats for store {StoreId}", store!.Id);
+        }
 
         try
         {
@@ -355,16 +388,6 @@ public class ArkController(
                          .SelectMany(i => i.GetPayments(false))
                          .Where(p => paymentMethods.Contains(p.PaymentMethodId)))
             {
-                if (payment.Status is PaymentStatus.Settled or PaymentStatus.Processing)
-                {
-                    receivedVolumeSats += Money.Coins(payment.Value).Satoshi;
-                }
-
-                if (payment.Status == PaymentStatus.Processing)
-                {
-                    processingPaymentCount++;
-                }
-
                 var isLightningPayment = payment.PaymentMethodId == lightningPaymentMethod ||
                                          payment.PaymentMethodId == lnurlPaymentMethod;
 
@@ -403,7 +426,6 @@ public class ArkController(
             logger.LogDebug(ex, "Failed to load VTXOs and contracts for wallet {WalletId}", config.WalletId);
         }
 
-        var recentPaymentCount = recentPayments.Count;
         var totalIntentCount = 0;
         var totalSwapCount = 0;
         var pendingLightningSwapCount = 0;
@@ -498,8 +520,8 @@ public class ArkController(
         recentPayments = [.. recentPayments.OrderByDescending(p => p.Date).Take(5)];
         var paymentStats = new List<StoreOverviewStatViewModel>
         {
-            new() { Name = "Recent volume", Value = receivedVolumeSats, Unit = StoreOverviewStatUnit.Sats },
-            new() { Name = "Recent payments", Value = recentPaymentCount },
+            new() { Name = "Total volume", Value = totalVolumeSats, Unit = StoreOverviewStatUnit.Sats },
+            new() { Name = "Total payments", Value = totalPaymentCount },
             new() { Name = "In progress", Value = processingPaymentCount + pendingLightningSwapCount },
             new() { Name = "Swap fees", Value = swapFeesSats, Unit = StoreOverviewStatUnit.Sats }
         };
