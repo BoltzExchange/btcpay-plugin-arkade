@@ -15,3 +15,6 @@ btcpay-run*.log
 # PluginPacker output
 /publish
 /release
+
+# Local-only env (fork RPC endpoints with API keys)
+/.env.local

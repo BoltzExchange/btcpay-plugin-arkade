@@ -1,20 +1,19 @@
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
-using Microsoft.Playwright;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace NArk.E2E.Tests;
 
 /// <summary>
-/// Times the click-to-paid latency of an Arkade invoice when funded via
-/// the checkout cheat-mode (out-of-round <c>ark send</c> from inside the
-/// arkd container, ~instant on arkd's side) and asserts the invoice
-/// transitions to <c>Settled</c> within a regression threshold.
+/// Times the pay-to-settled latency of an Arkade invoice when funded via a
+/// direct out-of-round <c>ark send</c> from inside the arkd container
+/// (~instant on arkd's side) and asserts the invoice transitions to
+/// <c>Settled</c> within a regression threshold.
 ///
 /// Two things this guards against:
 ///
-/// 1. <b>Latency regression.</b> The current observed click-to-paid time
+/// 1. <b>Latency regression.</b> The current observed pay-to-settled time
 ///    is ~6s, dominated by an unexplained gap between <c>UpsertVtxo</c>
 ///    firing <c>VtxosChanged</c> and BTCPay's invoice settling. We want a
 ///    test that fails loudly if a future change pushes this past
@@ -57,7 +56,7 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task CheatModePay_DirectArkTx_InvoiceSettlesWithinThreshold()
+    public async Task DirectArkTx_InvoiceSettlesWithinThreshold()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -73,8 +72,6 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
         var invoice = await client.CreateInvoice(storeId, new CreateInvoiceRequest
         {
-            // SATS amount so the cheat extension routes a 5000-sat send
-            // (matches what a manual cheat-pay button click would do).
             Amount = 5000m,
             Currency = "SATS",
             Checkout = new InvoiceDataBase.CheckoutOptions
@@ -84,39 +81,12 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
         });
         Assert.False(string.IsNullOrEmpty(invoice.Id));
 
-        // BTCPay enforces antiforgery on every UI controller POST (see
-        // UIControllerAntiforgeryTokenAttribute registered in Startup);
-        // missing token = 400 with empty body. Grab one off any page
-        // that rendered a form — the Arkade overview always does.
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-        var token = (await GetAntiforgeryTokenAsync()) ?? "";
+        var destination = await GetArkadeInvoiceDestinationAsync(client, storeId, invoice.Id);
 
-        // Start the clock and trigger the cheat-mode pay. The
-        // BTCPay route POST /i/{id}/test-payment invokes
-        // ArkadeCheckoutCheatModeExtension.PayInvoice which shells out
-        // `docker exec <arkd> ark send` — an out-of-round Ark tx that
-        // arkd processes essentially instantly.
+        // Start the clock and pay: an out-of-round Ark tx that arkd
+        // processes essentially instantly.
         var t0 = DateTimeOffset.UtcNow;
-        // BTCPay's UIInvoiceController.TestPayment doesn't decorate its
-        // request param with [FromBody], so ASP.NET MVC binds from form
-        // data — not JSON. Sending JSON silently falls back to default
-        // values (`PaymentMethodId="BTC"`) and the cheat-extension lookup
-        // returns null. Use form-urlencoded to match the binder.
-        var payResp = await Page!.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/i/{invoice.Id}/test-payment").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["Content-Type"] = "application/x-www-form-urlencoded",
-                    ["RequestVerificationToken"] = token
-                },
-                Data = "Amount=5000&CryptoCode=SATS&PaymentMethodId=ARKADE"
-            });
-
-        var payBody = await payResp.TextAsync();
-        Assert.True(payResp.Ok,
-            $"POST /i/{invoice.Id}/test-payment returned {payResp.Status}: {payBody}");
+        await ArkSendAsync(destination, 5000);
 
         // Poll the invoice status. We want to FAIL the test if the
         // invoice doesn't settle (missed event) AND record the elapsed
@@ -146,10 +116,10 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
             await Task.Delay(100);
         }
 
-        // Timeout. This is the missed-event regression path — the cheat-mode
-        // pay returned an OK txid (we asserted .Ok above) but the plugin's
-        // VtxosChanged → OnVtxoChanged → AddPayment → InvoiceWatcher chain
-        // never carried the payment through to Settled.
+        // Timeout. This is the missed-event regression path — the ark send
+        // returned a txid but the plugin's VtxosChanged → OnVtxoChanged →
+        // AddPayment → InvoiceWatcher chain never carried the payment
+        // through to Settled.
         Assert.Fail(
             $"Invoice {invoice.Id} never reached Settled within {HardTimeout.TotalSeconds:F0}s " +
             $"(last status: {lastStatus}). Likely a missed VtxosChanged event or a broken " +

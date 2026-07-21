@@ -1,18 +1,15 @@
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
-using CliWrap;
-using CliWrap.Buffered;
 using Microsoft.Extensions.DependencyInjection;
 using NArk.Abstractions.Wallets;
 using NArk.Core.Services;
-using Newtonsoft.Json.Linq;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace NArk.E2E.Tests;
 
 /// <summary>
-/// An Arkade invoice is paid (via <c>ark send</c>, like checkout cheat mode) while BTCPay is
+/// An Arkade invoice is paid (via a direct <c>ark send</c>) while BTCPay is
 /// DOWN; after an in-process restart the cold-start VTXO catch-up plus the invoice listener
 /// must settle it without any event having fired. Uses a dedicated ServerTester — the shared
 /// fixture's server must never be restarted, every other test holds its ServiceProvider —
@@ -38,6 +35,7 @@ public class RestartReconciliationTests : PlaywrightBaseTest
 
         var testDir = Path.Combine(Directory.GetCurrentDirectory(), "ArkadeRestartTest");
         var tester = CreateServerTester(testDir, newDb: true);
+        WriteArkNetworkOverride(testDir);
         tester.PayTester.LoadPluginsInDefaultAssemblyContext = false;
 
         // ServerTester's newDb only takes effect when the connection string's database is
@@ -104,22 +102,4 @@ public class RestartReconciliationTests : PlaywrightBaseTest
         }
     }
 
-    /// <summary>Pays an ark address from the arkd container's CLI wallet (checkout cheat-mode parity).</summary>
-    private static async Task<string?> ArkSendAsync(string destination, long amountSats)
-    {
-        var container = await ResolveArkdContainerAsync();
-        var result = await Cli.Wrap("docker")
-            .WithArguments([
-                "exec", container, "ark", "send",
-                "--to", destination,
-                "--amount", amountSats.ToString(),
-                "--password", "secret"
-            ])
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync();
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"ark send failed (exit={result.ExitCode}): {result.StandardError.Trim()} {result.StandardOutput.Trim()}");
-        return JObject.Parse(result.StandardOutput).Value<string>("txid");
-    }
 }

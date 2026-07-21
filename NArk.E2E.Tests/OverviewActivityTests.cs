@@ -8,6 +8,7 @@ using Microsoft.Playwright;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Wallets;
 using NArk.Core.Contracts;
+using NArk.Tests.End2End.Common;
 using NArk.Core.Services;
 using NArk.Core.Transport;
 using Xunit;
@@ -160,10 +161,7 @@ public class OverviewActivityTests : PlaywrightBaseTest
     private static async Task RunBitcoinCliAsync(params string[] args)
     {
         var result = await Cli.Wrap("docker")
-            .WithArguments(new[]
-            {
-                "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123"
-            }.Concat(args).ToArray())
+            .WithArguments(new[] { "exec", DockerHelper.BitcoinContainer }.Concat(DockerHelper.BitcoinCliArgs).Concat(args).ToArray())
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync();
         if (!result.IsSuccess)
