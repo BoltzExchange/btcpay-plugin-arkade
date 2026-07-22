@@ -79,77 +79,15 @@
 
                 @foreach (var option in Model.SettlementOptions)
                 {
-                    var optionSlug = option.Type switch
-                    {
-                        StoreSettlementOption.BitcoinMainchain => "mainchain",
-                        _ => option.Type.ToString()
-                    };
-                    var optionKey = StoreSettlementOptionKeys.GetKey(option.Type);
-                    var fieldsId = $"settlement-fields-{optionSlug}";
-                    var isActive = option.Enabled;
-
-                    <div class="border rounded p-3 @(option.Available ? "" : "bg-light")" data-testid="settlement-option-@optionSlug">
-                        <label class="d-flex gap-2 align-items-start m-0" role="button">
-                            <input class="form-check-input mt-1" type="radio" name="activeSettlement"
-                                   value="@optionKey" data-settlement-radio data-settlement-target="#@fieldsId"
-                                   checked="@(isActive ? "checked" : null)"
-                                   disabled="@(option.Available ? null : "disabled")" />
-                            <span class="min-w-0">
-                                <span class="fw-semibold d-flex flex-wrap align-items-center gap-2">
-                                    @option.Title
-                                    @if (!option.Available)
-                                    {
-                                        <span class="badge bg-white text-muted border">Unavailable</span>
-                                    }
-                                    else if (isActive)
-                                    {
-                                        <span class="badge text-bg-info">Active</span>
-                                    }
-                                </span>
-                                <span class="text-muted small d-block">@option.Description</span>
-                            </span>
-                        </label>
-
-                        @if (option.Available && option.Data is { } optionData)
-                        {
-                            <div id="@fieldsId" data-settlement-fields class="mt-3 @(isActive ? "" : "d-none")">
-                                @if (option.Type == StoreSettlementOption.BitcoinMainchain)
-                                {
-                                    var thresholdValue = optionData.Value<string>(MainchainSettlementData.ThresholdKey);
-                                    var minSats = optionData.Value<long?>(MainchainSettlementData.MinSatsKey);
-                                    var maxSats = optionData.Value<long?>(MainchainSettlementData.MaxSatsKey);
-                                    var thresholdField = SettlementInputName.Field(option.Type, MainchainSettlementData.ThresholdKey);
-                                    var thresholdInputId = $"{option.Type}{MainchainSettlementData.ThresholdKey}";
-                                    var thresholdHelp = minSats is not null && maxSats is not null
-                                        ? $"Allowed range: {minSats.Value:#,0}-{maxSats.Value:#,0} sats."
-                                        : "Boltz limits could not be loaded.";
-
-                                    <label for="@thresholdInputId" class="form-label">Settlement threshold</label>
-                                    <div class="input-group">
-                                        <input id="@thresholdInputId"
-                                               name="@thresholdField"
-                                               value="@thresholdValue"
-                                               class="form-control"
-                                               type="number"
-                                               min="@(minSats ?? 0)"
-                                               max="@maxSats"
-                                               step="1"
-                                               placeholder="Minimum" />
-                                        <span class="input-group-text">sats</span>
-                                    </div>
-                                    <div class="form-text">
-                                        @thresholdHelp
-                                    </div>
-                                }
-                            </div>
-                        }
-                        else if (!option.Available)
-                        {
-                            <div class="alert alert-warning small mb-0 mt-3" data-testid="@($"{optionSlug}-settlement-unavailable")">
-                                @option.UnavailableReason
-                            </div>
-                        }
-                    </div>
+                    <partial name="_SettlementOptionCard"
+                             model="@(new SettlementOptionCardViewModel
+                             {
+                                 Option = option,
+                                 IsInitialSetup = false,
+                                 IsChecked = option.Enabled,
+                                 Prefix = "",
+                                 MutedTextClass = "text-muted"
+                             })" />
                 }
             </div>
             <div class="d-flex justify-content-end mt-3">
@@ -201,4 +139,5 @@
 
 @section PageFootContent {
     <partial name="_SettlementRadioSyncScript" />
+    <partial name="_StablecoinWalletScript" model="Model.SettlementOptions" />
 }

@@ -171,8 +171,14 @@ See [docs/building-the-plugin.md](docs/building-the-plugin.md) for details.
 
 ### Prerequisites
 - .NET 10 SDK
+- Node.js 20–24 with npm 10+ (builds the embedded Reown AppKit wallet connector)
 - Docker (for test environment)
 - PostgreSQL
+
+The stablecoin destination wallet connector uses EVM and Solana namespaces.
+It defaults to Reown project ID `ba2fd40da144b7017436e42851ec62ae` and can be
+overridden with the `Arkade:ReownProjectId` configuration key. TRON wallet
+connection and settlement remain a TODO.
 
 ### Running Tests
 

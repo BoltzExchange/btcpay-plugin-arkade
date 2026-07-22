@@ -74,6 +74,7 @@ public class ArkController(
     ArkAutomatedPayoutSenderFactory payoutSenderFactory,
     PayoutProcessorService payoutProcessorService,
     IEnumerable<ISettlementOption> settlementOptions,
+    CompositeUsdSettlementService? usdSettlementService,
     InvoiceRepository invoiceRepository,
     EventAggregator eventAggregator,
     IIntentGenerationService intentGenerationService,
@@ -478,12 +479,42 @@ public class ArkController(
         var totalIntentCount = 0;
         var totalSwapCount = 0;
         var pendingLightningSwapCount = 0;
+        var pendingStablecoinSettlementCount = 0;
         var swapFeesSats = 0L;
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
             totalIntentCount = await db.Intents.CountAsync(i => i.WalletId == config.WalletId!, cancellationToken);
             totalSwapCount = await db.Swaps.CountAsync(s => s.WalletId == config.WalletId!, cancellationToken);
+
+            var ongoingStablecoinStates = StablecoinSettlementActivity.OngoingStates;
+            var terminalStablecoinStates = StablecoinSettlementActivity.TerminalStates;
+            // Ongoing rows and ManualReview rows are both fetched without a
+            // limit: ManualReview demands operator action and must never age
+            // out of the recent list, however old it is. Only ongoing rows
+            // count towards the "In progress" stat, though — an operator-owned
+            // row is stuck, not progressing.
+            var activeStablecoinSettlements = await db.UsdSettlementTransfers
+                .Where(transfer => transfer.StoreId == store!.Id &&
+                    transfer.WalletId == config.WalletId! &&
+                    !terminalStablecoinStates.Contains(transfer.State))
+                .OrderByDescending(transfer => transfer.UpdatedAt)
+                .ToListAsync(cancellationToken);
+            pendingStablecoinSettlementCount = activeStablecoinSettlements
+                .Count(transfer => ongoingStablecoinStates.Contains(transfer.State));
+
+            var recentStablecoinSettlements = await db.UsdSettlementTransfers
+                .Where(transfer => transfer.StoreId == store!.Id &&
+                    transfer.WalletId == config.WalletId! &&
+                    terminalStablecoinStates.Contains(transfer.State))
+                .OrderByDescending(transfer => transfer.UpdatedAt)
+                .Take(5)
+                .ToListAsync(cancellationToken);
+
+            var stablecoinSwapIds = activeStablecoinSettlements
+                .Where(transfer => transfer.NnarkSwapId != null)
+                .Select(transfer => transfer.NnarkSwapId!)
+                .ToList();
 
             var lightningSwapTypes = new[] { ArkSwapType.ReverseSubmarine, ArkSwapType.Submarine };
             var lightningSwaps = db.Swaps
@@ -493,7 +524,8 @@ public class ArkController(
             // only becomes payment activity once Boltz locks up funds for it — i.e. a VTXO
             // exists on the swap's contract script. Without that, it is just an unpaid invoice.
             var pendingLightningSwaps = lightningSwaps
-                .Where(s => s.Status == ArkSwapStatus.Pending || s.Status == ArkSwapStatus.Unknown);
+                .Where(s => (s.Status == ArkSwapStatus.Pending || s.Status == ArkSwapStatus.Unknown) &&
+                    !stablecoinSwapIds.Contains(s.SwapId));
             pendingLightningSwapCount = await pendingLightningSwaps
                 .CountAsync(s => s.SwapType == ArkSwapType.Submarine ||
                                  db.Vtxos.Any(v => v.Script == s.ContractScript), cancellationToken);
@@ -553,6 +585,10 @@ public class ArkController(
                 });
             }
 
+            recentPayments.AddRange(activeStablecoinSettlements
+                .Concat(recentStablecoinSettlements)
+                .Select(StablecoinSettlementActivity.Create));
+
             var swapContractScripts = await db.Swaps
                 .Where(s => s.WalletId == config.WalletId!)
                 .Select(s => s.ContractScript)
@@ -566,12 +602,28 @@ public class ArkController(
             logger.LogDebug(ex, "Failed to load activity counts for wallet {WalletId}", config.WalletId);
         }
 
-        recentPayments = [.. recentPayments.OrderByDescending(p => p.Date).Take(5)];
+        var pinnedActivity = recentPayments
+            .Where(payment => payment.KeepVisible)
+            .ToList();
+        var visibleRecentActivity = recentPayments
+            .Where(payment => !payment.KeepVisible)
+            .OrderByDescending(payment => payment.Date)
+            .Take(Math.Max(0, 5 - pinnedActivity.Count));
+        recentPayments =
+        [
+            .. pinnedActivity
+                .Concat(visibleRecentActivity)
+                .OrderByDescending(payment => payment.Date)
+        ];
         var paymentStats = new List<StoreOverviewStatViewModel>
         {
             new() { Name = "Total volume", Value = totalVolumeSats, Unit = StoreOverviewStatUnit.Sats },
             new() { Name = "Total payments", Value = totalPaymentCount },
-            new() { Name = "In progress", Value = processingPaymentCount + pendingLightningSwapCount },
+            new()
+            {
+                Name = "In progress",
+                Value = processingPaymentCount + pendingLightningSwapCount + pendingStablecoinSettlementCount
+            },
             new() { Name = "Swap fees", Value = swapFeesSats, Unit = StoreOverviewStatUnit.Sats }
         };
 
@@ -2483,6 +2535,39 @@ public class ArkController(
         {
             logger.LogWarning(ex, "Failed to cancel intent {IntentTxId}", intentTxId);
             return RedirectWithError(nameof(Intents), DescribeArkError(ex, "Failed to cancel intent"), new { storeId });
+        }
+    }
+
+    [HttpPost("stores/{storeId}/settlements/{transferId}/cancel")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public async Task<IActionResult> CancelStablecoinSettlement(
+        string storeId,
+        string transferId,
+        CancellationToken cancellationToken)
+    {
+        var (store, _, errorResult) = ValidateStoreAndConfig();
+        if (errorResult != null) return errorResult;
+
+        if (usdSettlementService is null)
+            return RedirectWithError(nameof(StoreOverview), "Stablecoin settlement is unavailable.", new { storeId });
+
+        try
+        {
+            var transfer = await usdSettlementService.CancelManualReviewTransfer(
+                store!.Id, transferId, cancellationToken);
+            if (transfer is null)
+                return RedirectWithError(nameof(StoreOverview), "Settlement transfer not found.", new { storeId });
+
+            return RedirectWithSuccess(nameof(StoreOverview), "Settlement record dismissed.", new { storeId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return RedirectWithError(nameof(StoreOverview), ex.Message, new { storeId });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RedirectWithError(nameof(StoreOverview),
+                "The settlement transfer changed while dismissing it; refresh and try again.", new { storeId });
         }
     }
 

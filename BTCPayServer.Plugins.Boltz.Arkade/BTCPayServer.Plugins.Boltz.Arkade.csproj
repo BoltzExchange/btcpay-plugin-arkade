@@ -17,7 +17,24 @@
         <NativeCargoProfile Condition="'$(NativeCargoProfile)' == ''">debug</NativeCargoProfile>
         <NativeCargoReleaseArg Condition="'$(Configuration)' == 'Release'">--release</NativeCargoReleaseArg>
         <NativeLibraryPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/target/$(NativeCargoProfile)/libboltz_client_bindings.so</NativeLibraryPath>
+        <ClientRoot>$(MSBuildProjectDirectory)/..</ClientRoot>
+        <ClientBundle>$(MSBuildProjectDirectory)/Resources/js/stablecoin-wallet.js</ClientBundle>
     </PropertyGroup>
+
+    <Target Name="RestoreClientDependencies"
+            BeforeTargets="BuildStablecoinWalletBundle"
+            Inputs="$(ClientRoot)/package.json;$(ClientRoot)/package-lock.json"
+            Outputs="$(ClientRoot)/node_modules/.package-lock.json">
+        <Exec WorkingDirectory="$(ClientRoot)" Command="npm ci" />
+    </Target>
+
+    <Target Name="BuildStablecoinWalletBundle"
+            BeforeTargets="PrepareForBuild"
+            DependsOnTargets="RestoreClientDependencies"
+            Inputs="$(ClientRoot)/Client/stablecoin-wallet.js;$(ClientRoot)/package.json;$(ClientRoot)/package-lock.json"
+            Outputs="$(ClientBundle)">
+        <Exec WorkingDirectory="$(ClientRoot)" Command="npm run build:wallet" />
+    </Target>
 
     <Target Name="BuildNativeBoltzClient"
             BeforeTargets="PrepareForBuild"
@@ -87,7 +104,8 @@
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.6"/>
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.6" />
-        <EmbeddedResource Include="Resources\**" />
+        <EmbeddedResource Include="Resources\**" Exclude="$(ClientBundle)" />
+        <EmbeddedResource Include="$(ClientBundle)" />
         <EmbeddedResource Include="arkade.svg" />
     </ItemGroup>
 

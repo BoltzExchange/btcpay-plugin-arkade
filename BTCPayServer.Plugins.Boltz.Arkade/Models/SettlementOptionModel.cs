@@ -20,8 +20,16 @@ public class SettlementOptionModel
     public string Slug => Type switch
     {
         StoreSettlementOption.BitcoinMainchain => "mainchain",
+        StoreSettlementOption.Usd => "usd",
         _ => Type.ToString()
     };
+}
+
+public sealed class StablecoinSettlementFormViewModel
+{
+    public required JObject Data { get; init; }
+    public required string InputPrefix { get; init; }
+    public bool IsInitialSetup { get; init; }
 }
 
 public sealed class MainchainSettlementFormViewModel

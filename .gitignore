@@ -15,9 +15,13 @@ btcpay-run*.log
 # PluginPacker output
 /publish
 /release
+/node_modules
 
 # Local-only env (fork RPC endpoints with API keys)
 /.env.local
 
 # Uploadable plugin packages produced by the deploy/build-artifact flow
 /artifacts
+
+# esbuild output; regenerated from Client/ by the BuildStablecoinWalletBundle target
+/BTCPayServer.Plugins.Boltz.Arkade/Resources/js/stablecoin-wallet.js

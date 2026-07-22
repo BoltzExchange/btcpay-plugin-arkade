@@ -1,0 +1,110 @@
+@using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@model StablecoinSettlementFormViewModel
+
+@{
+    var optionType = StoreSettlementOption.Usd;
+    var thresholdField = SettlementInputName.Field(optionType, UsdSettlementData.ThresholdKey);
+    var chainField = SettlementInputName.Field(optionType, UsdSettlementData.DestinationChainKey);
+    var addressField = SettlementInputName.Field(optionType, UsdSettlementData.DestinationAddressKey);
+    var assetField = SettlementInputName.Field(optionType, UsdSettlementData.AssetKey);
+    var slippageField = SettlementInputName.Field(optionType, UsdSettlementData.SlippageBpsKey);
+    var thresholdValue = Model.Data.Value<string>(UsdSettlementData.ThresholdKey);
+    var chainValue = Model.Data.Value<string>(UsdSettlementData.DestinationChainKey);
+    var addressValue = Model.Data.Value<string>(UsdSettlementData.DestinationAddressKey);
+    var assetValue = Model.Data.Value<string>(UsdSettlementData.AssetKey);
+    var slippageValue = Model.Data.Value<string>(UsdSettlementData.SlippageBpsKey);
+}
+
+<div class="row g-3 mt-1" data-stablecoin-wallet>
+    <div class="col-12">
+        <label for="@(Model.InputPrefix + UsdSettlementData.DestinationAddressKey)" class="form-label">Destination wallet</label>
+        <div class="input-group">
+            <input id="@(Model.InputPrefix + UsdSettlementData.DestinationAddressKey)"
+                   name="@addressField"
+                   value="@addressValue"
+                   class="form-control font-monospace"
+                   autocomplete="off"
+                   placeholder="Stablecoin destination address"
+                   data-stablecoin-address />
+            <button type="button" class="btn btn-outline-secondary" data-wallet-connect>
+                Connect wallet
+            </button>
+        </div>
+        @Html.ValidationMessage(addressField, null, new { @class = "text-danger" })
+        <div class="form-text" data-wallet-connect-status aria-live="polite">
+            Connecting fills the wallet address and network. You can also enter them manually.
+        </div>
+    </div>
+    <div class="col-md-6">
+        <label for="@(Model.InputPrefix + UsdSettlementData.DestinationChainKey)" class="form-label">Network</label>
+        <select id="@(Model.InputPrefix + UsdSettlementData.DestinationChainKey)"
+                name="@chainField"
+                class="form-select"
+                data-stablecoin-chain
+                data-testid="stablecoin-settlement-chain-select">
+            <option value="" selected="@(string.IsNullOrEmpty(chainValue) ? "selected" : null)">Select network</option>
+            @foreach (var chain in UsdSettlementData.DestinationChains)
+            {
+                <option value="@chain" selected="@(chain == chainValue ? "selected" : null)">@chain</option>
+            }
+        </select>
+        @Html.ValidationMessage(chainField, null, new { @class = "text-danger" })
+    </div>
+    <div class="col-md-6">
+        <label for="@(Model.InputPrefix + UsdSettlementData.AssetKey)" class="form-label">Asset</label>
+        <select id="@(Model.InputPrefix + UsdSettlementData.AssetKey)"
+                name="@assetField"
+                class="form-select"
+                data-testid="stablecoin-settlement-asset-select">
+            @foreach (var asset in UsdSettlementData.Assets)
+            {
+                <option value="@asset" selected="@(asset == assetValue ? "selected" : null)">@asset</option>
+            }
+        </select>
+        @Html.ValidationMessage(assetField, null, new { @class = "text-danger" })
+    </div>
+    <div class="col-md-6">
+        <label for="@(Model.InputPrefix + UsdSettlementData.ThresholdKey)" class="form-label">Settlement threshold</label>
+        <div class="input-group">
+            <input id="@(Model.InputPrefix + UsdSettlementData.ThresholdKey)"
+                   name="@thresholdField"
+                   value="@thresholdValue"
+                   class="form-control"
+                   type="number"
+                   min="0"
+                   step="1"
+                   placeholder="Minimum"
+                   data-settlement-focus="@(Model.IsInitialSetup ? "" : null)"
+                   data-testid="usd-settlement-threshold-input" />
+            <span class="input-group-text">sats</span>
+        </div>
+        @Html.ValidationMessage(thresholdField, null, new { @class = "text-danger" })
+    </div>
+    <div class="col-md-6">
+        <label for="@(Model.InputPrefix + UsdSettlementData.SlippageBpsKey)" class="form-label">Maximum slippage</label>
+        <div class="input-group">
+            <input id="@(Model.InputPrefix + UsdSettlementData.SlippageBpsKey)"
+                   name="@slippageField"
+                   value="@slippageValue"
+                   class="form-control"
+                   type="number"
+                   min="@UsdSettlementData.MinSlippageBps"
+                   max="@UsdSettlementData.MaxSlippageBps"
+                   step="1" />
+            <span class="input-group-text">bps</span>
+        </div>
+        @Html.ValidationMessage(slippageField, null, new { @class = "text-danger" })
+    </div>
+</div>
+<div class="form-text mt-2">
+    Leave the threshold blank or set it to zero to settle as soon as the swap minimum is reached.
+    @if (Model.IsInitialSetup)
+    {
+        @:Leave the destination address blank to skip stablecoin settlement during setup.
+    }
+    else
+    {
+        @:Choose Off above to turn off stablecoin settlement.
+    }
+</div>

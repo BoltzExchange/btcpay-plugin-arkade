@@ -221,15 +221,49 @@
                         <div class="text-muted small">
                             @if (!string.IsNullOrEmpty(payment.Description))
                             {
-                                <span>@payment.Description - </span>
+                                @if (!string.IsNullOrEmpty(payment.ExplorerUrl))
+                                {
+                                    <a href="@payment.ExplorerUrl"
+                                       target="_blank"
+                                       rel="noreferrer noopener"
+                                       title="@(payment.ExplorerLabel ?? "View transaction")"
+                                       data-testid="activity-explorer-link">@payment.Description</a>
+                                }
+                                else
+                                {
+                                    <span>@payment.Description</span>
+                                }
+                                <span> - </span>
                             }
                             <span>@payment.Date.ToLocalTime().ToString("g")</span>
                         </div>
+                        @if (!string.IsNullOrEmpty(payment.DetailText))
+                        {
+                            var detailId = $"ActivityDetail-{index}";
+                            <button class="d-inline-flex align-items-center btn btn-link btn-sm text-secondary p-0 mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#@detailId" aria-expanded="false" aria-controls="@detailId" data-testid="activity-detail-toggle">
+                                <vc:icon symbol="caret-down" />
+                                <span class="ms-1">Details</span>
+                            </button>
+                            <div id="@detailId" class="collapse">
+                                <div class="text-secondary small text-break mt-1" data-testid="activity-detail-text">@payment.DetailText</div>
+                            </div>
+                        }
+                        @if (payment.CanCancel && !string.IsNullOrEmpty(payment.TransferId))
+                        {
+                            <form asp-action="CancelStablecoinSettlement"
+                                  method="post"
+                                  asp-route-storeId="@storeId"
+                                  asp-route-transferId="@payment.TransferId"
+                                  class="mt-2"
+                                  onsubmit="return confirm('This dismisses the settlement record. Verify funds manually first.');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm" data-testid="activity-cancel-btn">Cancel</button>
+                            </form>
+                        }
                     </div>
                     <div class="text-sm-end flex-shrink-0">
                         @if (payment.ShowAmount)
                         {
-                            <div class="fw-semibold" data-sensitive>@($"{prefix}{DisplayFormatter.Currency(payment.Amount, payment.Currency)}")</div>
+                            <div class="fw-semibold" data-sensitive>@($"{prefix}{DisplayFormatter.Currency(payment.Amount, payment.Currency, divisibility: payment.AmountDivisibility)}")</div>
                         }
                         @if (!string.IsNullOrEmpty(payment.AmountSubtext))
                         {

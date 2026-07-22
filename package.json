@@ -1,0 +1,20 @@
+{
+  "name": "btcpayserver-plugins-boltz-arkade-ui",
+  "private": true,
+  "engines": {
+    "node": ">=20 <25",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "build:wallet": "esbuild Client/stablecoin-wallet.js --bundle --format=esm --minify --outfile=BTCPayServer.Plugins.Boltz.Arkade/Resources/js/stablecoin-wallet.js"
+  },
+  "dependencies": {
+    "@reown/appkit": "1.8.22",
+    "@reown/appkit-adapter-ethers": "1.8.22",
+    "@reown/appkit-adapter-solana": "1.8.22",
+    "ethers": "6.17.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}
