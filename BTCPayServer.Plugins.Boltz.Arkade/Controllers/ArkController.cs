@@ -145,18 +145,39 @@ public class ArkController(
             return NotFound();
 
         model.SettlementInputs = ReadSettlementInputsFromForm();
-        model = await CreateInitialWalletSetupViewModel(store, model, HttpContext.RequestAborted);
-        foreach (var option in settlementOptions)
+        var (validSelection, selectedSettlement) = ReadActiveSettlementSelection();
+        // Keep the submitted choice pre-checked when a validation error re-renders the form.
+        if (validSelection)
         {
-            var validationResult = await option.ValidateInput(
-                store,
-                model.SettlementInputs.GetValueOrDefault(option.Type),
-                HttpContext.RequestAborted);
-            if (validationResult is null)
-                continue;
-
-            ModelState.AddModelError(validationResult.FieldName, validationResult.Message);
+            model.SelectedSettlement = selectedSettlement;
+            model.SettlementSelectionSubmitted = true;
+        }
+        model = await CreateInitialWalletSetupViewModel(store, model, HttpContext.RequestAborted);
+        if (!validSelection)
+        {
+            ModelState.AddModelError(string.Empty, "Unknown settlement method.");
             return View(model);
+        }
+
+        // Only the chosen settlement method is validated and applied; the
+        // methods are mutually exclusive.
+        var chosenSettlement = selectedSettlement is { } selectedOption
+            ? settlementOptions.FirstOrDefault(option => option.Type == selectedOption)
+            : null;
+        if (chosenSettlement is not null)
+        {
+            // Fail fast before creating the wallet. The wallet does not exist yet,
+            // so wallet-scoped checks are deferred (walletId null) to the apply pass.
+            var validationResult = await chosenSettlement.ValidateInput(
+                store,
+                walletId: null,
+                model.SettlementInputs.GetValueOrDefault(chosenSettlement.Type),
+                HttpContext.RequestAborted);
+            if (validationResult is not null)
+            {
+                ModelState.AddModelError(validationResult.FieldName, validationResult.Message);
+                return View(model);
+            }
         }
 
         try
@@ -196,11 +217,28 @@ public class ArkController(
             var config = new ArkadePaymentMethodConfig(
                 walletId,
                 WalletBackedUp: !walletSettings.IsNewlyGeneratedWallet);
-            foreach (var option in settlementOptions)
-                config = option.ApplyInitialSetupDefault(
-                    store,
-                    config,
-                    model.SettlementInputs.GetValueOrDefault(option.Type));
+
+            string? settlementSetupWarning = null;
+            var settlementOutcome = await ApplySettlementSelection(
+                store,
+                config,
+                selectedSettlement,
+                model.SettlementInputs,
+                HttpContext.RequestAborted);
+            if (settlementOutcome.Error is not null)
+            {
+                // The wallet exists now; only a wallet-scoped check (the stablecoin
+                // destination binding) can still fail. Keep the wallet and surface
+                // the settlement failure as a warning rather than persisting a rule
+                // that can never fund.
+                settlementSetupWarning =
+                    $"Arkade wallet setup succeeded, but settlement was not enabled: {settlementOutcome.Error.Message}";
+                config = config.SetActiveSettlement(null);
+            }
+            else
+            {
+                config = settlementOutcome.Config!;
+            }
             store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], config);
 
             // Set Arkade as the default payment method
@@ -233,7 +271,18 @@ public class ArkController(
 
             await storeRepository.UpdateStore(store);
 
-            TempData[WellKnownTempData.SuccessMessage] = "Arkade payment method updated.";
+            if (settlementSetupWarning is not null)
+            {
+                TempData.SetStatusMessageModel(new StatusMessageModel
+                {
+                    Severity = StatusMessageModel.StatusSeverity.Warning,
+                    Message = settlementSetupWarning
+                });
+            }
+            else
+            {
+                TempData[WellKnownTempData.SuccessMessage] = "Arkade payment method updated.";
+            }
 
             return RedirectToAction(nameof(StoreOverview), new { storeId });
         }
@@ -1697,6 +1746,60 @@ public class ArkController(
         return viewModels;
     }
 
+    private sealed record SettlementSelectionOutcome(
+        ArkadePaymentMethodConfig? Config,
+        string? SuccessMessage,
+        SettlementOptionValidationResult? Error);
+
+    // Shared parse-selection -> validate -> apply flow for both initial setup and
+    // the settings save. The methods are mutually exclusive: a null selection turns
+    // settlement off; any other selection must validate and always activates.
+    private async Task<SettlementSelectionOutcome> ApplySettlementSelection(
+        StoreData store,
+        ArkadePaymentMethodConfig config,
+        StoreSettlementOption? selected,
+        IReadOnlyDictionary<StoreSettlementOption, SettlementInput> inputs,
+        CancellationToken cancellationToken)
+    {
+        if (selected is not { } selectedType)
+            return new SettlementSelectionOutcome(config.SetActiveSettlement(null), null, null);
+
+        var option = settlementOptions.First(candidate => candidate.Type == selectedType);
+        var input = inputs.GetValueOrDefault(option.Type);
+
+        var validationError = await option.ValidateInput(store, config.WalletId, input, cancellationToken);
+        if (validationError is not null)
+            return new SettlementSelectionOutcome(null, null, validationError);
+
+        var result = await option.Save(store, config, input, cancellationToken);
+        if (!result.Success || result.Config is null)
+            return new SettlementSelectionOutcome(
+                null, null, new SettlementOptionValidationResult(string.Empty, result.Message));
+
+        return new SettlementSelectionOutcome(
+            result.Config.SetActiveSettlement(option.Type),
+            result.Message,
+            null);
+    }
+
+    private (bool Valid, StoreSettlementOption? Option) ReadActiveSettlementSelection()
+    {
+        if (!Request.HasFormContentType)
+            return (true, null);
+
+        var form = Request.Form;
+        if (!form.ContainsKey("activeSettlement"))
+            return (true, null);
+
+        var raw = form["activeSettlement"].ToString();
+        if (string.Equals(raw, StoreSettlementOptionKeys.None, StringComparison.Ordinal))
+            return (true, null);
+
+        return StoreSettlementOptionKeys.TryGetOption(raw, out var option)
+            ? (true, option)
+            : (false, null);
+    }
+
     private Dictionary<StoreSettlementOption, SettlementInput> ReadSettlementInputsFromForm()
     {
         var inputs = new Dictionary<StoreSettlementOption, SettlementInput>();
@@ -1767,22 +1870,30 @@ public class ArkController(
                 new { storeId });
         }
 
-        if (!string.IsNullOrEmpty(command) &&
-            settlementOptions.FirstOrDefault(option => option.HandlesCommand(command)) is { } settlementOption)
+        if (command == "settlement:save")
         {
-            var result = await settlementOption.HandleCommand(
-                command,
+            var (validSelection, selected) = ReadActiveSettlementSelection();
+            if (!validSelection)
+                return RedirectWithError(nameof(Settings), "Unknown settlement method.", new { storeId });
+
+            var outcome = await ApplySettlementSelection(
                 storeData,
                 arkConfig,
-                model.SettlementInputs.GetValueOrDefault(settlementOption.Type),
+                selected,
+                model.SettlementInputs,
                 cancellationToken);
-            if (!result.Success || result.Config is null)
-                return RedirectWithError(nameof(Settings), result.Message, new { storeId });
+            if (outcome.Error is not null)
+                return RedirectWithError(nameof(Settings), outcome.Error.Message, new { storeId });
 
-            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], result.Config);
+            storeData.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], outcome.Config!);
             await storeRepository.UpdateStore(storeData);
-            await settlementOption.OnSaved(result.Config, cancellationToken);
-            return RedirectWithSuccess(nameof(Settings), result.Message, new { storeId });
+
+            // Off keeps the methods' stored config but stops settling.
+            if (selected is not { } activated)
+                return RedirectWithSuccess(nameof(Settings), "Automatic settlement turned off.", new { storeId });
+
+            await settlementOptions.First(option => option.Type == activated).OnSaved(outcome.Config!, cancellationToken);
+            return RedirectWithSuccess(nameof(Settings), outcome.SuccessMessage!, new { storeId });
         }
 
         return RedirectToAction(nameof(Settings), new { storeId });

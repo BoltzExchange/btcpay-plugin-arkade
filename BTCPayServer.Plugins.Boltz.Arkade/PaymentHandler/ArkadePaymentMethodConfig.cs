@@ -6,10 +6,29 @@ public record ArkadePaymentMethodConfig(
     string WalletId,
     bool? WalletBackedUp = null,
     bool AllowSubDustAmounts = false,
-    List<StoreSettlementOptionConfig>? SettlementOptions = null)
+    List<StoreSettlementOptionConfig>? SettlementOptions = null,
+    string? ActiveSettlement = null)
 {
     public StoreSettlementOptionConfig? GetSettlementOption(StoreSettlementOption option) =>
         SettlementOptions?.FirstOrDefault(o => o.Type == StoreSettlementOptionKeys.GetKey(option));
+
+    // Settlement methods are mutually exclusive: at most one moves funds at a
+    // time. Each method's own config still persists (dormant) so switching
+    // methods preserves the merchant's entered values. Only an explicitly
+    // stored, recognized key activates a method; anything else is off.
+    public StoreSettlementOption? ResolveActiveSettlement() =>
+        ActiveSettlement is { Length: > 0 } key &&
+        StoreSettlementOptionKeys.TryGetOption(key, out var option)
+            ? option
+            : null;
+
+    public ArkadePaymentMethodConfig SetActiveSettlement(StoreSettlementOption? option) =>
+        this with
+        {
+            ActiveSettlement = option is { } value
+                ? StoreSettlementOptionKeys.GetKey(value)
+                : StoreSettlementOptionKeys.None
+        };
 
     public ArkadePaymentMethodConfig SetSettlementOptionData(
         StoreSettlementOption option,
@@ -64,6 +83,7 @@ public record StoreSettlementOptionConfig(
 
 public static class StoreSettlementOptionKeys
 {
+    public const string None = "none";
     public const string BitcoinMainchain = "bitcoin-mainchain";
 
     public static string GetKey(StoreSettlementOption option) =>
@@ -72,6 +92,19 @@ public static class StoreSettlementOptionKeys
             StoreSettlementOption.BitcoinMainchain => BitcoinMainchain,
             _ => throw new ArgumentOutOfRangeException(nameof(option), option, "Unknown settlement option.")
         };
+
+    public static bool TryGetOption(string? key, out StoreSettlementOption option)
+    {
+        switch (key)
+        {
+            case BitcoinMainchain:
+                option = StoreSettlementOption.BitcoinMainchain;
+                return true;
+            default:
+                option = default;
+                return false;
+        }
+    }
 }
 
 public enum StoreSettlementOption

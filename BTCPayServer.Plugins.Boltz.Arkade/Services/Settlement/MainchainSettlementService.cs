@@ -43,8 +43,6 @@ public class MainchainSettlementService(
 {
     private static readonly TimeSpan SettlementCheckDelay = TimeSpan.FromMilliseconds(250);
     private const string MainchainSettlementAddressLabel = "Arkade settlement swap";
-    private const string SaveCommand = "settlement:bitcoin-mainchain:save";
-    private const string DisableCommand = "settlement:bitcoin-mainchain:disable";
 
     private readonly Channel<string> _walletQueue = Channel.CreateUnbounded<string>();
     private readonly ConcurrentDictionary<string, byte> _queuedWallets = new();
@@ -79,28 +77,27 @@ public class MainchainSettlementService(
             Description =
                 "Settle Arkade funds to this store's Bitcoin on-chain wallet once the spendable balance reaches the threshold.",
             Available = available,
-            Enabled = configuredThreshold is > 0,
+            Enabled = config.ResolveActiveSettlement() == Type,
             UnavailableReason = unavailableReason,
-            SaveCommand = SaveCommand,
-            DisableCommand = DisableCommand,
             Data = data
         };
     }
 
     public async Task<SettlementOptionValidationResult?> ValidateInput(
         StoreData store,
+        string? walletId,
         SettlementInput? input,
         CancellationToken cancellationToken)
     {
+        if (!IsAvailable(store, out var unavailableReason))
+            return ValidationError(unavailableReason ?? "Settlement option is unavailable.");
+
         var (threshold, thresholdError) = ReadThreshold(input);
         if (thresholdError is not null)
             return ValidationError(thresholdError);
 
         if (threshold is null)
-            return null;
-
-        if (!IsAvailable(store, out var unavailableReason))
-            return ValidationError(unavailableReason ?? "Settlement option is unavailable.");
+            return ValidationError("Enter a settlement threshold to enable Bitcoin mainchain settlement.");
 
         var limits = await GetMainchainSettlementLimits(cancellationToken);
         return ValidateThresholdAgainstLimits(threshold.Value, limits) is { } limitError
@@ -108,49 +105,17 @@ public class MainchainSettlementService(
             : null;
     }
 
-    public ArkadePaymentMethodConfig ApplyInitialSetupDefault(
-        StoreData store,
-        ArkadePaymentMethodConfig config,
-        SettlementInput? input)
-    {
-        if (!IsAvailable(store, out _))
-            return config;
-
-        var (threshold, _) = ReadThreshold(input);
-        return SetConfiguredThreshold(config, threshold);
-    }
-
-    public bool HandlesCommand(string command) =>
-        command == SaveCommand || command == DisableCommand;
-
-    public async Task<SettlementOptionUpdateResult> HandleCommand(
-        string command,
+    public Task<SettlementOptionUpdateResult> Save(
         StoreData store,
         ArkadePaymentMethodConfig config,
         SettlementInput? input,
         CancellationToken cancellationToken)
     {
-        if (command == DisableCommand)
-        {
-            return SettlementOptionUpdateResult.Saved(
-                SetConfiguredThreshold(config, null),
-                "Mainchain settlement disabled.");
-        }
-
-        if (command != SaveCommand)
-            return SettlementOptionUpdateResult.Error("Unsupported settlement option command.");
-
-        var validationResult = await ValidateInput(store, input, cancellationToken);
-        if (validationResult is not null)
-            return SettlementOptionUpdateResult.Error(validationResult.Message);
-
         var (threshold, _) = ReadThreshold(input);
         var newConfig = SetConfiguredThreshold(config, threshold);
-        var message = threshold is > 0
-            ? $"Mainchain settlement threshold set to {threshold.Value:#,0} sats."
-            : "Mainchain settlement disabled.";
-
-        return SettlementOptionUpdateResult.Saved(newConfig, message);
+        return Task.FromResult(SettlementOptionUpdateResult.Saved(
+            newConfig,
+            $"Mainchain settlement threshold set to {threshold.GetValueOrDefault():#,0} sats."));
     }
 
     public Task OnSaved(ArkadePaymentMethodConfig config, CancellationToken cancellationToken)
@@ -376,12 +341,18 @@ public class MainchainSettlementService(
                 ArkadePlugin.ArkadePaymentMethodId,
                 paymentMethodHandlerDictionary);
 
-            var thresholdSats = config is null ? null : GetConfiguredThreshold(config);
-            if (string.IsNullOrWhiteSpace(config?.WalletId) ||
-                thresholdSats is not > 0)
+            if (string.IsNullOrWhiteSpace(config?.WalletId))
                 continue;
 
-            configs.Add(new StoreSettlementConfig(store, config, thresholdSats.Value));
+            // Settlement is mutually exclusive: only the store's active method
+            // moves funds. A dormant method's config remains stored but inert.
+            var active = config.ResolveActiveSettlement();
+
+            if (active == StoreSettlementOption.BitcoinMainchain &&
+                GetConfiguredThreshold(config) is > 0 and var mainchainThreshold)
+            {
+                configs.Add(new StoreSettlementConfig(store, config, mainchainThreshold));
+            }
         }
 
         return configs;

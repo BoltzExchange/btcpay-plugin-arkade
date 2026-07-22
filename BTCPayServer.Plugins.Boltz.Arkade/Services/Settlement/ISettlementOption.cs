@@ -16,18 +16,11 @@ public interface ISettlementOption
 
     Task<SettlementOptionValidationResult?> ValidateInput(
         StoreData store,
+        string? walletId,
         SettlementInput? input,
         CancellationToken cancellationToken);
 
-    ArkadePaymentMethodConfig ApplyInitialSetupDefault(
-        StoreData store,
-        ArkadePaymentMethodConfig config,
-        SettlementInput? input);
-
-    bool HandlesCommand(string command);
-
-    Task<SettlementOptionUpdateResult> HandleCommand(
-        string command,
+    Task<SettlementOptionUpdateResult> Save(
         StoreData store,
         ArkadePaymentMethodConfig config,
         SettlementInput? input,
@@ -46,6 +39,8 @@ public record SettlementOptionUpdateResult(
     public static SettlementOptionUpdateResult Error(string message) =>
         new(false, message);
 
-    public static SettlementOptionUpdateResult Saved(ArkadePaymentMethodConfig config, string message) =>
+    public static SettlementOptionUpdateResult Saved(
+        ArkadePaymentMethodConfig config,
+        string message) =>
         new(true, message, config);
 }
