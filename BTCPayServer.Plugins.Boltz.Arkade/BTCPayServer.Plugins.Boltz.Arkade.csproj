@@ -57,7 +57,13 @@
             <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
         </ProjectReference>
     </ItemDefinitionGroup>
-    
+
+    <ItemGroup>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>NArk.E2E.Tests</_Parameter1>
+        </AssemblyAttribute>
+    </ItemGroup>
+
     <ItemGroup>
         <Compile Include="..\BoltzClientBindings\generated\boltz_client_bindings.cs" Link="Native\boltz_client_bindings.g.cs" />
         <Content Include="$(NativeLibraryPath)"

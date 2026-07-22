@@ -27,36 +27,14 @@ public class SettlementTriggerTests : PlaywrightBaseTest
         _fixture = fixture;
     }
 
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ArkadeWalletBalance_AboveThreshold_StartsMainchainSettlement()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywright(_fixture.ServerTester!);
-
-        await GoToUrl("/register");
-        await RegisterNewUser(isAdmin: true);
-
-        var storeId = await CreateStore();
-        await ConfigureBtcOnchainWalletAsync(_fixture.ServerTester!, storeId);
-        await ConfigureArkadeWalletAsync(storeId, thresholdSats: 50_000);
-        var walletId = await GetStoreArkadeWalletIdAsync(storeId);
-
-        await EnsureArkdCliReadyAsync();
-
-        var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
-        await PayArkadeInvoiceAsync(client, storeId, 30_000);
-        await PayArkadeInvoiceAsync(client, storeId, 30_000);
-
-        var services = _fixture.ServerTester!.PayTester.ServiceProvider;
-        // The destination is the store's NBXplorer-tracked onchain wallet, not a bitcoind
-        // address, so Settled status is the strongest completion assertion available here.
-        await WaitForSwapAsync(services, walletId,
-            ArkSwapType.ChainArkToBtc,
-            [ArkSwapStatus.Settled],
-            TimeSpan.FromMinutes(4), mineWhileWaiting: true);
-    }
-
+    /// <summary>
+    /// The single mainchain-settlement trigger journey: a balance crossing
+    /// the configured threshold starts a settlement chain swap, the swap
+    /// amount is capped at the Boltz maximum, and the capped settlement
+    /// completes. (Threshold crossing by accumulation over several payments
+    /// is the same balance comparison; the stablecoin threshold flows cover
+    /// the two-payment shape.)
+    /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ArkadeWalletBalance_AboveBoltzMax_CapsMainchainSettlementAmount()
@@ -103,6 +81,7 @@ public class SettlementTriggerTests : PlaywrightBaseTest
             new PageWaitForURLOptions { Timeout = 30_000 });
 
         await OpenCreateWalletSettlementStepAsync();
+        await Page.CheckAsync("#createNew input[name='activeSettlement'][value='bitcoin-mainchain']");
         await Page.FillAsync($"#createNew {MainchainThresholdInput}", thresholdSats.ToString());
         await Page.ClickAsync("#createNew [data-testid='create-wallet-btn']");
 

@@ -6,7 +6,7 @@ or manual upload to a BTCPay Server instance.
 ## Prerequisites
 
 - .NET 10 SDK
-- Node.js 20–24 with npm 10+ (for the regtest CLI and embedded wallet bundle)
+- Node.js 20–24 with npm 10+ (for the embedded wallet bundle)
 - Docker (for the regtest stack)
 - GNU Make
 

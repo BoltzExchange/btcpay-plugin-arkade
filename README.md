@@ -182,7 +182,7 @@ connection and settlement remain a TODO.
 
 ### Running Tests
 
-After running `make setup`, start the local regtest environment (Bitcoin + arkd + Boltz/Fulmine — a cross-platform Node CLI) and run the E2E suite:
+After running `make setup`, start the Compose-based regtest environment (Bitcoin + arkd + Boltz/Fulmine) and run the E2E suite:
 ```bash
 make regtest
 make test

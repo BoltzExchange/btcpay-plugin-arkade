@@ -539,6 +539,22 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 doc.RootElement.GetProperty("boardingSats").GetInt64());
     }
 
+    protected async Task<IAPIResponse> SendGreenfieldAsync(string method, string path, object? body = null)
+    {
+        var options = new APIRequestContextOptions
+        {
+            Method = method,
+            Headers = new Dictionary<string, string>
+            {
+                ["Authorization"] =
+                    $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes($"{CreatedUser}:{Password}"))}",
+                ["Content-Type"] = "application/json",
+            },
+            DataObject = body,
+        };
+        return await Page!.Context.APIRequest.FetchAsync(new Uri(ServerUri!, path).AbsoluteUri, options);
+    }
+
     /// <summary>
     /// Default wait between poll attempts. The conditions polled by these tests hit
     /// local HTTP/DB endpoints where an attempt costs milliseconds, so a tight
