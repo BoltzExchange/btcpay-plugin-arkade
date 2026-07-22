@@ -615,6 +615,28 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return arkade.Destination;
     }
 
+    /// <summary>
+    /// Runs the Payments report for the store through the plugin's provider, asserting on the
+    /// way that it replaced BTCPay's default provider rather than being registered alongside it.
+    /// </summary>
+    protected async Task<(List<string> Fields, IList<IList<object?>> Rows)> QueryPaymentsReportAsync(
+        string storeId)
+    {
+        var provider = Assert.Single(
+            Services!.GetServices<BTCPayServer.Services.Reporting.ReportProvider>(),
+            p => p.Name == "Payments");
+        // Compare by name: BTCPay loads the plugin assembly in its own context, so the
+        // provider's CLR type is distinct from the test project's compile-time reference.
+        Assert.Equal(
+            typeof(BTCPayServer.Plugins.Boltz.Arkade.Services.ArkadePaymentsReportProvider).FullName,
+            provider.GetType().FullName);
+
+        var queryContext = new BTCPayServer.Services.Reporting.QueryContext(
+            storeId, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        await provider.Query(queryContext, CancellationToken.None);
+        return (queryContext.ViewDefinition!.Fields.Select(f => f.Name).ToList(), queryContext.Data);
+    }
+
     protected static async Task<string> GetNewRegtestBitcoinAddressAsync()
     {
         var address = (await DockerHelper.Exec(DockerHelper.BitcoinContainer, [.. DockerHelper.BitcoinCliArgs, "getnewaddress"])).Trim();

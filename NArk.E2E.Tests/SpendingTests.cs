@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Playwright;
 using Xunit;
 using Xunit.Abstractions;
@@ -6,10 +5,11 @@ using Xunit.Abstractions;
 namespace NArk.E2E.Tests;
 
 /// <summary>
-/// Exercises the offchain spend path: a funded wallet selects coins via
-/// /suggest-coins and submits a transfer through the /send wizard to another
-/// store's Arkade address. Both wallets are funded/observed through the
-/// in-process IContractService note path (see FundedWalletTests).
+/// Unhappy-path coverage for the offchain spend endpoints on an empty
+/// wallet: /suggest-coins reports "no spendable coins" instead of throwing,
+/// and a /send with no coins selected surfaces a validation error and moves
+/// no funds. (The funded spend path is covered by FundedWalletTests and
+/// OverviewActivityTests.)
 /// </summary>
 [Collection("Arkade Plugin Tests")]
 public class SpendingTests : PlaywrightBaseTest
@@ -22,14 +22,9 @@ public class SpendingTests : PlaywrightBaseTest
         _fixture = fixture;
     }
 
-    /// <summary>
-    /// Unhappy path: the /send wizard with no coins selected (manual coin
-    /// mode, empty selection) must surface a validation error and not move
-    /// funds.
-    /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task Send_NoCoinsSelected_ShowsError()
+    public async Task EmptyWallet_SuggestCoinsAndSend_SurfaceValidationErrors()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -40,44 +35,10 @@ public class SpendingTests : PlaywrightBaseTest
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
-        // No selectedVtxoOutpoints and no auto CoinSelectionMode → "No coins selected".
-        var resp = await Page.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["RequestVerificationToken"] = token,
-                    ["Content-Type"] = "application/x-www-form-urlencoded"
-                },
-                Data = UrlEncodeForm(new()
-                {
-                    ["Outputs[0].Destination"] = recipientAddr,
-                    ["Outputs[0].AmountBtc"] = "0.0001"
-                })
-            });
 
-        Assert.True(resp.Ok, $"send returned {resp.Status}");
-        var html = await resp.TextAsync();
-        Assert.Contains("No coins selected", html);
-    }
-
-    /// <summary>
-    /// /suggest-coins on an empty wallet returns the "no spendable coins"
-    /// error rather than throwing.
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task SuggestCoins_EmptyWallet_ReturnsNoCoinsError()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-        var token = (await GetAntiforgeryTokenAsync()) ?? "";
-
-        var resp = await Page!.Context.APIRequest.PostAsync(
+        // /suggest-coins on an empty wallet returns the "no spendable
+        // coins" error rather than throwing.
+        var suggestResp = await Page!.Context.APIRequest.PostAsync(
             new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/suggest-coins").AbsoluteUri,
             new APIRequestContextOptions
             {
@@ -89,15 +50,27 @@ public class SpendingTests : PlaywrightBaseTest
                 DataObject = new { destinationType = "ArkAddress", amountSats = 10_000L }
             });
 
-        Assert.True(resp.Ok, $"suggest-coins returned {resp.Status}");
-        var json = await resp.JsonAsync();
+        Assert.True(suggestResp.Ok, $"suggest-coins returned {suggestResp.Status}");
+        var json = await suggestResp.JsonAsync();
         var error = json!.Value.TryGetProperty("error", out var e) ? e.GetString() : null;
         Assert.False(string.IsNullOrEmpty(error), "empty wallet should report no spendable coins");
+
+        // No selectedVtxoOutpoints and no auto CoinSelectionMode → "No coins selected".
+        var sendResp = await Page.Context.APIRequest.PostAsync(
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/send").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["RequestVerificationToken"] = token,
+                    ["Content-Type"] = "application/x-www-form-urlencoded"
+                },
+                Data = $"Outputs%5B0%5D.Destination={Uri.EscapeDataString(recipientAddr)}" +
+                       "&Outputs%5B0%5D.AmountBtc=0.0001"
+            });
+
+        Assert.True(sendResp.Ok, $"send returned {sendResp.Status}");
+        var html = await sendResp.TextAsync();
+        Assert.Contains("No coins selected", html);
     }
-
-    // --- helpers ---
-
-    private static string UrlEncodeForm(Dictionary<string, string> fields) =>
-        string.Join("&", fields.Select(kv =>
-            $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
 }
