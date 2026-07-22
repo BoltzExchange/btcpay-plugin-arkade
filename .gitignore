@@ -18,3 +18,6 @@ btcpay-run*.log
 
 # Local-only env (fork RPC endpoints with API keys)
 /.env.local
+
+# Uploadable plugin packages produced by the deploy/build-artifact flow
+/artifacts

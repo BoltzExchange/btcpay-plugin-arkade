@@ -4,6 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
         <Product>Boltz.Arkade</Product>
         <Description>Accept Arkade offchain Bitcoin and Lightning payments in BTCPay Server. Published by Boltz Exchange.</Description>
@@ -12,7 +13,19 @@
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>
         <MvcRazorCompileOnPublish>false</MvcRazorCompileOnPublish>
+        <NativeCargoProfile Condition="'$(Configuration)' == 'Release'">release</NativeCargoProfile>
+        <NativeCargoProfile Condition="'$(NativeCargoProfile)' == ''">debug</NativeCargoProfile>
+        <NativeCargoReleaseArg Condition="'$(Configuration)' == 'Release'">--release</NativeCargoReleaseArg>
+        <NativeLibraryPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/target/$(NativeCargoProfile)/libboltz_client_bindings.so</NativeLibraryPath>
     </PropertyGroup>
+
+    <Target Name="BuildNativeBoltzClient"
+            BeforeTargets="PrepareForBuild"
+            Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+        <Exec Command="cargo build --locked $(NativeCargoReleaseArg) --manifest-path &quot;$(MSBuildProjectDirectory)/../BoltzClientBindings/Cargo.toml&quot;" />
+        <Error Condition="!Exists('$(NativeLibraryPath)')"
+               Text="Native Boltz client build succeeded without producing $(NativeLibraryPath)." />
+    </Target>
 
     <PropertyGroup>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
@@ -29,6 +42,12 @@
     </ItemDefinitionGroup>
     
     <ItemGroup>
+        <Compile Include="..\BoltzClientBindings\generated\boltz_client_bindings.cs" Link="Native\boltz_client_bindings.g.cs" />
+        <Content Include="$(NativeLibraryPath)"
+                 Condition="$([MSBuild]::IsOSPlatform('Linux'))"
+                 Link="libboltz_client_bindings.so"
+                 CopyToOutputDirectory="PreserveNewest"
+                 CopyToPublishDirectory="PreserveNewest" />
         <!-- BTCPayServer -->
         <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" >
             <Private>false</Private>

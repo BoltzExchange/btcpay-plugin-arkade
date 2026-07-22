@@ -1,0 +1,24 @@
+[package]
+name = "boltz-client-bindings"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[lib]
+name = "boltz_client_bindings"
+crate-type = ["cdylib"]
+
+[dependencies]
+async-trait = "=0.1.88"
+boltz-client = { git = "https://github.com/breez/boltz-client.git", rev = "ef036b3b348f042d70c0141aaaf421c3eda075eb" }
+serde_json = "=1.0.140"
+thiserror = "=2.0.12"
+tokio = { version = "=1.45.1", features = ["macros", "rt-multi-thread"] }
+uniffi = "=0.31.0"
+zeroize = "=1.8.1"
+
+[profile.release]
+panic = "unwind"
+lto = true
+codegen-units = 1
