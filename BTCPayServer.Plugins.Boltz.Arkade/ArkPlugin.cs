@@ -13,6 +13,7 @@ using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler;
 using BTCPayServer.Plugins.Boltz.Arkade.Payouts.Ark;
 using BTCPayServer.Plugins.Boltz.Arkade.Services;
 using BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement;
+using BTCPayServer.Plugins.Boltz.Arkade.Services.Stablecoin;
 using BTCPayServer.Plugins.Boltz.Arkade.Services.WalletLogger;
 using BTCPayServer.Services.Notifications;
 using BTCPayServer.Services.Reporting;
@@ -333,6 +334,10 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton<ISettlementOption>(sp => sp.GetRequiredService<MainchainSettlementService>());
         services.AddHostedService(sp => sp.GetRequiredService<MainchainSettlementService>());
 
+        services.AddSingleton<StablecoinSwapClient>();
+        services.AddSingleton<IStablecoinSwapClient>(sp => sp.GetRequiredService<StablecoinSwapClient>());
+        services.AddHostedService(sp => sp.GetRequiredService<StablecoinSwapClient>());
+
         services.AddSingleton<BoardingTransactionListener>();
         services.AddHostedService(sp => sp.GetRequiredService<BoardingTransactionListener>());
 
@@ -360,6 +365,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             services.AddHttpClient<CachedBoltzClient>();
             services.AddArkSwapServices();
             services.AddSingleton<ISettlementService, ArkadeChainSwapSettlementService>();
+            services.AddSingleton<CompositeUsdSettlementService>();
 
             // Tag every Boltz swap-creation request with the BTCPay-Arkade
             // referral so Boltz can credit the integration. Mirrors the

@@ -85,29 +85,37 @@ public static class StoreSettlementOptionKeys
 {
     public const string None = "none";
     public const string BitcoinMainchain = "bitcoin-mainchain";
+    public const string Usd = "usd";
+
+    private static readonly Dictionary<StoreSettlementOption, string> Keys = new()
+    {
+        [StoreSettlementOption.BitcoinMainchain] = BitcoinMainchain,
+        [StoreSettlementOption.Usd] = Usd
+    };
 
     public static string GetKey(StoreSettlementOption option) =>
-        option switch
-        {
-            StoreSettlementOption.BitcoinMainchain => BitcoinMainchain,
-            _ => throw new ArgumentOutOfRangeException(nameof(option), option, "Unknown settlement option.")
-        };
+        Keys.TryGetValue(option, out var key)
+            ? key
+            : throw new ArgumentOutOfRangeException(nameof(option), option, "Unknown settlement option.");
 
     public static bool TryGetOption(string? key, out StoreSettlementOption option)
     {
-        switch (key)
+        foreach (var (candidate, candidateKey) in Keys)
         {
-            case BitcoinMainchain:
-                option = StoreSettlementOption.BitcoinMainchain;
+            if (candidateKey == key)
+            {
+                option = candidate;
                 return true;
-            default:
-                option = default;
-                return false;
+            }
         }
+
+        option = default;
+        return false;
     }
 }
 
 public enum StoreSettlementOption
 {
-    BitcoinMainchain
+    BitcoinMainchain,
+    Usd
 }
