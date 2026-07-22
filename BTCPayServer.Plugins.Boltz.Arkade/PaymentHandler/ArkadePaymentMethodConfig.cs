@@ -30,6 +30,11 @@ public record ArkadePaymentMethodConfig(
                 : StoreSettlementOptionKeys.None
         };
 
+    // Turning a method off only clears the active selection when that method was
+    // the active one, so disabling a dormant method never stops the active one.
+    public ArkadePaymentMethodConfig DeactivateSettlement(StoreSettlementOption option) =>
+        ResolveActiveSettlement() == option ? SetActiveSettlement(null) : this;
+
     public ArkadePaymentMethodConfig SetSettlementOptionData(
         StoreSettlementOption option,
         JObject? additionalData)
