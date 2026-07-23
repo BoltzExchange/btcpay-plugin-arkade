@@ -7,6 +7,7 @@ using Xunit;
 
 namespace NArk.E2E.Tests;
 
+[Trait("Category", "Unit")]
 public class UsdSettlementReconciliationStateTests
 {
     [Fact]

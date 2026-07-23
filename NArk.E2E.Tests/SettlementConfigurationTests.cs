@@ -10,6 +10,7 @@ using Xunit.Abstractions;
 
 namespace NArk.E2E.Tests;
 
+[Trait("Category", "Unit")]
 public class ArkadePaymentMethodConfigTests
 {
     [Fact]
