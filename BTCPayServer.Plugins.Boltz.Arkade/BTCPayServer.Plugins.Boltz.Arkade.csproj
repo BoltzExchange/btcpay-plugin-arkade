@@ -4,6 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
         <Product>Boltz.Arkade</Product>
         <Description>Accept Arkade offchain Bitcoin and Lightning payments in BTCPay Server. Published by Boltz Exchange.</Description>
@@ -12,7 +13,36 @@
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>
         <MvcRazorCompileOnPublish>false</MvcRazorCompileOnPublish>
+        <NativeCargoProfile Condition="'$(Configuration)' == 'Release'">release</NativeCargoProfile>
+        <NativeCargoProfile Condition="'$(NativeCargoProfile)' == ''">debug</NativeCargoProfile>
+        <NativeCargoReleaseArg Condition="'$(Configuration)' == 'Release'">--release</NativeCargoReleaseArg>
+        <NativeLibraryPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/target/$(NativeCargoProfile)/libboltz_client_bindings.so</NativeLibraryPath>
+        <ClientRoot>$(MSBuildProjectDirectory)/..</ClientRoot>
+        <ClientBundle>$(MSBuildProjectDirectory)/Resources/js/stablecoin-wallet.js</ClientBundle>
     </PropertyGroup>
+
+    <Target Name="RestoreClientDependencies"
+            BeforeTargets="BuildStablecoinWalletBundle"
+            Inputs="$(ClientRoot)/package.json;$(ClientRoot)/package-lock.json"
+            Outputs="$(ClientRoot)/node_modules/.package-lock.json">
+        <Exec WorkingDirectory="$(ClientRoot)" Command="npm ci" />
+    </Target>
+
+    <Target Name="BuildStablecoinWalletBundle"
+            BeforeTargets="PrepareForBuild"
+            DependsOnTargets="RestoreClientDependencies"
+            Inputs="$(ClientRoot)/Client/stablecoin-wallet.js;$(ClientRoot)/package.json;$(ClientRoot)/package-lock.json"
+            Outputs="$(ClientBundle)">
+        <Exec WorkingDirectory="$(ClientRoot)" Command="npm run build:wallet" />
+    </Target>
+
+    <Target Name="BuildNativeBoltzClient"
+            BeforeTargets="PrepareForBuild"
+            Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+        <Exec Command="cargo build --locked $(NativeCargoReleaseArg) --manifest-path &quot;$(MSBuildProjectDirectory)/../BoltzClientBindings/Cargo.toml&quot;" />
+        <Error Condition="!Exists('$(NativeLibraryPath)')"
+               Text="Native Boltz client build succeeded without producing $(NativeLibraryPath)." />
+    </Target>
 
     <PropertyGroup>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
@@ -27,8 +57,20 @@
             <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
         </ProjectReference>
     </ItemDefinitionGroup>
-    
+
     <ItemGroup>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>NArk.E2E.Tests</_Parameter1>
+        </AssemblyAttribute>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Compile Include="..\BoltzClientBindings\generated\boltz_client_bindings.cs" Link="Native\boltz_client_bindings.g.cs" />
+        <Content Include="$(NativeLibraryPath)"
+                 Condition="$([MSBuild]::IsOSPlatform('Linux'))"
+                 Link="libboltz_client_bindings.so"
+                 CopyToOutputDirectory="PreserveNewest"
+                 CopyToPublishDirectory="PreserveNewest" />
         <!-- BTCPayServer -->
         <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" >
             <Private>false</Private>
@@ -68,7 +110,8 @@
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.6"/>
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.6" />
-        <EmbeddedResource Include="Resources\**" />
+        <EmbeddedResource Include="Resources\**" Exclude="$(ClientBundle)" />
+        <EmbeddedResource Include="$(ClientBundle)" />
         <EmbeddedResource Include="arkade.svg" />
     </ItemGroup>
 

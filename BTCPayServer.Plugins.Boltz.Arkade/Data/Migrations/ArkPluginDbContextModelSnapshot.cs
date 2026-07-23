@@ -23,6 +23,145 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("BTCPayServer.Plugins.Boltz.Arkade.Data.NativeKeyIndexEntity", b =>
+                {
+                    b.Property<string>("WalletId")
+                        .HasColumnType("text");
+
+                    b.Property<long>("NextIndex")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("WalletId");
+
+                    b.ToTable("NativeKeyIndices", "BTCPayServer.Plugins.Boltz.Arkade");
+                });
+
+            modelBuilder.Entity("BTCPayServer.Plugins.Boltz.Arkade.Data.NativeSwapEntity", b =>
+                {
+                    b.Property<string>("WalletId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SwapId")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsTerminal")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Json")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("WalletId", "SwapId");
+
+                    b.HasIndex("WalletId", "IsTerminal");
+
+                    b.ToTable("NativeSwaps", "BTCPayServer.Plugins.Boltz.Arkade");
+                });
+
+            modelBuilder.Entity("BTCPayServer.Plugins.Boltz.Arkade.Data.UsdSettlementTransferEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ArbitrumClaimTxHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ArkFundingTxId")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("ArkLegFeeSats")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("BridgeKind")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BridgeRef")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("DeliveredOutputAtomic")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("DestinationAddress")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DestinationAsset")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DestinationNetwork")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<long>("ExpectedOutputAtomic")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Invoice")
+                        .HasColumnType("text");
+
+                    b.Property<long>("InvoiceAmountSats")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("NnarkSwapId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PaymentHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RustSwapId")
+                        .HasColumnType("text");
+
+                    b.Property<long>("SourceAmountSats")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("StableLegFeeSats")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StoreId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TbtcLockupTxId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WalletId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<uint>("Xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NnarkSwapId")
+                        .IsUnique()
+                        .HasFilter("\"NnarkSwapId\" IS NOT NULL");
+
+                    b.HasIndex("RustSwapId")
+                        .IsUnique()
+                        .HasFilter("\"RustSwapId\" IS NOT NULL");
+
+                    b.HasIndex("WalletId", "State");
+
+                    b.ToTable("UsdSettlementTransfers", "BTCPayServer.Plugins.Boltz.Arkade");
+                });
+
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkIntentEntity", b =>
                 {
                     b.Property<string>("IntentTxId")

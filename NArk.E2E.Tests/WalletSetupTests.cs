@@ -47,10 +47,16 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.Equal(1, await importOption.CountAsync());
     }
 
-    /// <summary>The new-wallet path creates a wallet and lands on overview.</summary>
+    /// <summary>
+    /// The full hot-wallet journey on a single store: creation lands on
+    /// overview (no setup/backup detour), deep activity pages only show
+    /// inside the wallet-details panel, the wallet-log download endpoint
+    /// returns a file (regression target for PR #46), and the seed-backup
+    /// reminder stays hidden until funds arrive, then clears on mark-done.
+    /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task CreateNewHotWallet_LandsOnOverview()
+    public async Task CreateNewHotWallet_OverviewJourney_DefersSeedBackupUntilFundsArrive()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
@@ -60,20 +66,22 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.Contains($"/plugins/ark/stores/{storeId}/overview", Page!.Url);
         Assert.DoesNotContain("/initial-setup", Page.Url);
         Assert.DoesNotContain("/recovery-seed-backup", Page.Url);
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task CreateNewHotWallet_DefersSeedBackupReminderUntilFundsArrive()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-
-        Assert.Contains($"/plugins/ark/stores/{storeId}/overview", Page!.Url);
-        Assert.DoesNotContain("/recovery-seed-backup", Page.Url);
         Assert.Equal(0, await Page.Locator("[data-testid='wallet-backup-warning']").CountAsync());
+
+        // Deep activity pages (swaps/vtxos/intents) live behind the
+        // wallet-details toggle, not in the store nav.
+        Assert.Equal(0, await Page.Locator("#StoreNav-Swaps, #StoreNav-Vtxos, #StoreNav-Intents").CountAsync());
+        await Page.ClickAsync("[data-testid='wallet-details-toggle']");
+        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-vtxos-link']").CountAsync());
+        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-intents-link']").CountAsync());
+        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-swaps-link']").CountAsync());
+
+        // The per-wallet diagnostic log endpoint returns 200 + a file body
+        // even before any log lines have been written.
+        var logResp = await Page.Context.APIRequest.GetAsync(
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/wallet-log").AbsoluteUri,
+            new APIRequestContextOptions { MaxRedirects = 0 });
+        Assert.True(logResp.Ok, $"wallet-log endpoint returned {logResp.Status}");
 
         await FundStoreWalletViaNoteAsync(_fixture.ServerTester!, storeId, 50_000);
         await WaitForVisibleSelectorAsync(
@@ -98,156 +106,54 @@ public class WalletSetupTests : PlaywrightBaseTest
         Assert.DoesNotContain("not backed up", settingsBody, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Importing a BIP-39 seed phrase creates an HD wallet.</summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ImportBip39SeedPhrase_StoresHdWallet()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
-        var storeId = await CreateStoreWithArkWalletAsync(mnemonic);
-
-        Assert.Contains($"/plugins/ark/stores/{storeId}", Page!.Url);
-        Assert.DoesNotContain("/initial-setup", Page.Url);
-    }
-
-    /// <summary>Unsupported wallet input re-renders setup with an error.</summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task InvalidWalletInput_ShowsValidationError()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStore();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
-
-        await OpenImportWalletSettlementStepAsync("not-a-valid-wallet-format-xyzzy");
-        await Page!.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
-
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        Assert.Contains("/initial-setup", Page.Url);
-        var bodyText = await Page.InnerTextAsync("body");
-        var sawError = bodyText.Contains("Unsupported", StringComparison.OrdinalIgnoreCase) ||
-                       bodyText.Contains("Could not update wallet", StringComparison.OrdinalIgnoreCase);
-        Assert.True(sawError, $"Expected an error message but page body was:\n{bodyText[..Math.Min(500, bodyText.Length)]}");
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task Overview_DeepActivityPagesOnlyShowInWalletDetails()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-
-        Assert.Equal(0, await Page!.Locator("#StoreNav-Swaps, #StoreNav-Vtxos, #StoreNav-Intents").CountAsync());
-
-        await Page.ClickAsync("[data-testid='wallet-details-toggle']");
-        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-vtxos-link']").CountAsync());
-        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-intents-link']").CountAsync());
-        Assert.Equal(1, await Page.Locator("[data-testid='wallet-details-swaps-link']").CountAsync());
-    }
-
-    /// <summary>Arkade receive addresses are rejected as wallet imports.</summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ImportArkadeAddress_IsRejected()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var donorStoreId = await CreateStoreWithArkWalletAsync();
-        var donorAddress = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, donorStoreId);
-
-        var storeId = await CreateStore();
-        await GoToUrl($"/plugins/ark/stores/{storeId}/getting-started");
-        await Page.ClickAsync("[data-testid='getting-started-continue-btn']");
-        await Page.WaitForURLAsync(
-            url => url.Contains("/initial-setup"),
-            new PageWaitForURLOptions { Timeout = 30_000 });
-
-        await OpenImportWalletSettlementStepAsync(donorAddress);
-        await Page.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        Assert.Contains("/initial-setup", Page.Url);
-        var bodyText = await Page.InnerTextAsync("body");
-        Assert.Contains("Unsupported", bodyText, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Attaching another store's wallet by id is rejected.</summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ImportWalletId_IsRejected()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeAId = await CreateStoreWithArkWalletAsync();
-        await GoToUrl($"/plugins/ark/stores/{storeAId}/overview");
-        var walletId = await Page!.GetAttributeAsync(".truncate-center-id", "data-text");
-        Assert.False(string.IsNullOrWhiteSpace(walletId), "store A has no wallet id");
-
-        var storeBId = await CreateStore();
-        await GoToUrl($"/plugins/ark/stores/{storeBId}/initial-setup");
-
-        await OpenImportWalletSettlementStepAsync(walletId!);
-        await Page.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        Assert.Contains("/initial-setup", Page.Url);
-        var bodyText = await Page.InnerTextAsync("body");
-        Assert.Contains("Unsupported", bodyText, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Restoring another store's seed phrase is rejected.</summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ImportMnemonicUsedByAnotherStore_IsRejected()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
-        var storeAId = await CreateStoreWithArkWalletAsync(mnemonic);
-
-        var storeBId = await CreateStore();
-        Assert.NotEqual(storeAId, storeBId);
-        await GoToUrl($"/plugins/ark/stores/{storeBId}/initial-setup");
-
-        await OpenImportWalletSettlementStepAsync(mnemonic);
-        await Page!.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        Assert.Contains("/initial-setup", Page.Url);
-        var bodyText = await Page.InnerTextAsync("body");
-        Assert.Contains("already in use by another store", bodyText, StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>
-    /// Download the per-wallet diagnostic log file. The endpoint returns
-    /// 200 + a file body even when no log lines have been written yet.
-    /// (Regression target for PR #46 — added the wallet-log feature.)
+    /// Import-path validation on a single donor/importer pair. The donor
+    /// store imports a fresh BIP-39 mnemonic (covering the successful
+    /// seed-import path); the importing store then tries every rejected
+    /// input against the same setup page: unsupported garbage, an Arkade
+    /// receive address, another store's wallet id, and a mnemonic already
+    /// in use by another store.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task WalletLogDownload_ReturnsFile()
+    public async Task ImportWallet_RejectsUnsupportedAndForeignInputs()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        var storeId = await CreateStoreWithArkWalletAsync();
+        var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve).ToString();
+        var donorStoreId = await CreateStoreWithArkWalletAsync(mnemonic);
+        Assert.Contains($"/plugins/ark/stores/{donorStoreId}", Page!.Url);
+        Assert.DoesNotContain("/initial-setup", Page.Url);
+        var donorAddress = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, donorStoreId);
+        var donorWalletId = await GetStoreWalletIdAsync(donorStoreId);
+        Assert.False(string.IsNullOrWhiteSpace(donorWalletId), "donor store has no wallet id");
 
-        var resp = await Page!.Context.APIRequest.GetAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/wallet-log").AbsoluteUri,
-            new APIRequestContextOptions { MaxRedirects = 0 });
-        Assert.True(resp.Ok, $"wallet-log endpoint returned {resp.Status}");
+        var storeId = await CreateStore();
+
+        // Garbage may surface either as "Unsupported" or the generic
+        // update failure, matching the pre-merge tolerance.
+        await AssertImportRejectedAsync(storeId, "not-a-valid-wallet-format-xyzzy",
+            "Unsupported", "Could not update wallet");
+        await AssertImportRejectedAsync(storeId, donorAddress, "Unsupported");
+        await AssertImportRejectedAsync(storeId, donorWalletId!, "Unsupported");
+        await AssertImportRejectedAsync(storeId, mnemonic, "already in use by another store");
     }
 
+    private async Task AssertImportRejectedAsync(
+        string storeId, string walletInput, params string[] expectedErrors)
+    {
+        await GoToUrl($"/plugins/ark/stores/{storeId}/initial-setup");
+
+        await OpenImportWalletSettlementStepAsync(walletInput);
+        await Page!.ClickAsync("#importExisting [data-testid='import-wallet-btn']");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        Assert.Contains("/initial-setup", Page.Url);
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.True(
+            expectedErrors.Any(error => bodyText.Contains(error, StringComparison.OrdinalIgnoreCase)),
+            $"Expected one of [{string.Join(", ", expectedErrors)}] for input '{walletInput}' " +
+            $"but page body was:\n{bodyText[..Math.Min(500, bodyText.Length)]}");
+    }
 }

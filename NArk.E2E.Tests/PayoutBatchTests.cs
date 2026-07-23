@@ -70,16 +70,25 @@ public class PayoutBatchTests : PlaywrightBaseTest
         await PauseArkdRoundsAsync();
         try
         {
+            // The pause only stops future rounds. Give the current 30-second session
+            // enough time to finish before submitting an intent that must stay pending.
+            await Task.Delay(TimeSpan.FromSeconds(35));
+
             await SubmitBatchSendForPayoutAsync(storeId, payout);
 
             var inProgress = await client.GetStorePayout(storeId, payout.Id);
             Assert.Equal(PayoutState.InProgress, inProgress.State);
+            var intentTxId = inProgress.PaymentProof.Properties()
+                .FirstOrDefault(property => property.Name.Equals(
+                    "IntentTxId", StringComparison.OrdinalIgnoreCase))
+                ?.Value.ToString();
+            Assert.False(string.IsNullOrWhiteSpace(intentTxId));
 
             // Cancel the pending intent from the Intents page (the submit lands there already).
             // The coins return to the wallet, so the settlement listener must revert the payout
             // for retry instead of leaving it marked paid with an unpaid recipient.
             Page!.Dialog += async (_, dialog) => await dialog.AcceptAsync();
-            var cancelButton = Page.Locator("button[title='Cancel Intent']").First;
+            var cancelButton = Page.Locator($"#intent_{intentTxId} button[title='Cancel Intent']");
             await cancelButton.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             await cancelButton.ClickAsync();
 

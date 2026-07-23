@@ -6,12 +6,14 @@ using BTCPayServer.Data;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Plugins.Boltz.Arkade.Data;
 using BTCPayServer.Plugins.Boltz.Arkade.Exceptions;
 using BTCPayServer.Plugins.Boltz.Arkade.Models;
 using BTCPayServer.Plugins.Boltz.Arkade.Models.Api;
 using BTCPayServer.Plugins.Boltz.Arkade.Models.Api.Greenfield;
 using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler;
 using BTCPayServer.Plugins.Boltz.Arkade.Services;
+using BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement;
 using BTCPayServer.Security;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
@@ -19,6 +21,7 @@ using LNURL;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NArk.Abstractions;
 using NArk.Abstractions.Blockchain;
@@ -38,6 +41,7 @@ using NArk.Swaps.Boltz;
 using NArk.Swaps.Models;
 using NBitcoin;
 using NBitcoin.Scripting;
+using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Boltz.Arkade.Controllers;
 
@@ -67,9 +71,12 @@ public class ArkGreenfieldController(
     IWalletStorage walletStorage,
     IWalletProvider walletProvider,
     IIntentStorage intentStorage,
+    IDbContextFactory<ArkPluginDbContext> dbContextFactory,
     BoardingUtxoSyncService boardingUtxoSyncService,
     IHttpClientFactory httpClientFactory,
     ArkOperatorHealthService arkOperatorHealth,
+    UsdSettlementOption stablecoinSettlementOption,
+    CompositeUsdSettlementService? usdSettlementService,
     ILogger<ArkGreenfieldController> logger,
     BoltzLimitsValidator? boltzLimitsValidator) : ControllerBase
 {
@@ -1018,6 +1025,259 @@ public class ArkGreenfieldController(
             : metadata
                 .Where(kv => PublicSwapMetadataKeys.Contains(kv.Key))
                 .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+    #endregion
+
+    #region Stablecoin settlement transfers
+
+    /// <summary>
+    /// Get the current store's stablecoin settlement configuration.
+    /// </summary>
+    [HttpGet("~/api/v1/stores/{storeId}/arkade/stablecoin/settlement")]
+    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
+    public IActionResult GetStablecoinSettlement(string storeId)
+    {
+        var (config, error) = GetStoreConfig();
+        if (error is not null)
+            return error;
+
+        return Ok(MapStablecoinSettlementConfig(
+            UsdSettlementConfiguration.Get(config!),
+            config!.ResolveActiveSettlement() == StoreSettlementOption.Usd,
+            stablecoinSettlementOption));
+    }
+
+    /// <summary>
+    /// Enable or update threshold-based stablecoin settlement for the current store.
+    /// </summary>
+    [HttpPut("~/api/v1/stores/{storeId}/arkade/stablecoin/settlement")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
+    public async Task<IActionResult> SetStablecoinSettlement(
+        string storeId,
+        [FromBody] StablecoinSettlementConfigData request,
+        CancellationToken cancellationToken)
+    {
+        var store = HttpContext.GetStoreData();
+        if (store is null)
+            return this.CreateAPIError(404, "store-not-found", "Store not found.");
+
+        var (config, error) = GetStoreConfig();
+        if (error is not null)
+            return error;
+
+        // Settlement methods are mutually exclusive; disabling only clears the
+        // active flag and keeps the stored destination/threshold dormant.
+        if (!request.Enabled)
+        {
+            var disabledConfig = config!.DeactivateSettlement(StoreSettlementOption.Usd);
+            store.SetPaymentMethodConfig(
+                paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId],
+                disabledConfig);
+            await storeRepository.UpdateStore(store);
+            await stablecoinSettlementOption.OnSaved(disabledConfig, cancellationToken);
+
+            return Ok(MapStablecoinSettlementConfig(
+                UsdSettlementConfiguration.Get(disabledConfig),
+                disabledConfig.ResolveActiveSettlement() == StoreSettlementOption.Usd,
+                stablecoinSettlementOption));
+        }
+
+        var input = new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = request.ThresholdSats,
+                [UsdSettlementData.DestinationChainKey] = ParseStablecoinChain(request.DestinationChain),
+                [UsdSettlementData.DestinationAddressKey] = request.DestinationAddress,
+                [UsdSettlementData.AssetKey] = request.Asset
+            }
+        };
+        var validationError = await stablecoinSettlementOption.ValidateInput(
+            store, config!.WalletId, input, cancellationToken);
+        if (validationError is not null)
+            return this.CreateAPIError(400, "invalid-stablecoin-settlement", validationError.Message);
+
+        var result = await stablecoinSettlementOption.Save(store, config!, input, cancellationToken);
+        if (!result.Success || result.Config is null)
+            return this.CreateAPIError(400, "invalid-stablecoin-settlement", result.Message);
+
+        // Enabling stablecoin makes it the store's active method.
+        var updatedConfig = result.Config.SetActiveSettlement(StoreSettlementOption.Usd);
+        store.SetPaymentMethodConfig(
+            paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId],
+            updatedConfig);
+        await storeRepository.UpdateStore(store);
+        await stablecoinSettlementOption.OnSaved(updatedConfig, cancellationToken);
+
+        return Ok(MapStablecoinSettlementConfig(
+            UsdSettlementConfiguration.Get(updatedConfig),
+            updatedConfig.ResolveActiveSettlement() == StoreSettlementOption.Usd,
+            stablecoinSettlementOption));
+    }
+
+    /// <summary>
+    /// List stablecoin settlement transfers for the current store.
+    /// </summary>
+    [HttpGet("~/api/v1/stores/{storeId}/arkade/stablecoin/transfers")]
+    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
+    public async Task<IActionResult> ListStablecoinSettlementTransfers(
+        string storeId,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var currentStoreId = CurrentStoreId;
+        if (currentStoreId is null)
+            return this.CreateAPIError(404, "store-not-found", "Store not found.");
+
+        skip = Math.Max(skip, 0);
+        take = Math.Clamp(take, 1, 500);
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var transfers = await db.UsdSettlementTransfers
+            .AsNoTracking()
+            .Where(transfer => transfer.StoreId == currentStoreId)
+            .OrderByDescending(transfer => transfer.CreatedAt)
+            .ThenByDescending(transfer => transfer.Id)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+
+        return Ok(transfers.Select(MapStablecoinSettlementTransfer).ToList());
+    }
+
+    /// <summary>
+    /// Cancel (dismiss) a stablecoin settlement transfer awaiting manual review.
+    /// Only operator-owned rows are cancellable — automation owns every other state.
+    /// </summary>
+    [HttpPost("~/api/v1/stores/{storeId}/arkade/stablecoin/transfers/{transferId}/cancel")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
+    public async Task<IActionResult> CancelStablecoinSettlementTransfer(
+        string storeId,
+        string transferId,
+        CancellationToken cancellationToken)
+    {
+        var currentStoreId = CurrentStoreId;
+        if (currentStoreId is null)
+            return this.CreateAPIError(404, "store-not-found", "Store not found.");
+
+        if (usdSettlementService is null)
+            return this.CreateAPIError(400, "stablecoin-settlement-unavailable",
+                "Stablecoin settlement is unavailable on this instance.");
+
+        try
+        {
+            var transfer = await usdSettlementService.CancelManualReviewTransfer(
+                currentStoreId, transferId, cancellationToken);
+            if (transfer is null)
+                return this.CreateAPIError(404, "transfer-not-found", "Settlement transfer not found.");
+
+            return Ok(MapStablecoinSettlementTransfer(transfer));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return this.CreateAPIError(400, "transfer-not-cancellable", ex.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return this.CreateAPIError(409, "transfer-concurrently-modified",
+                "The settlement transfer was modified concurrently; reload it and try again.");
+        }
+    }
+
+    private static string TryCanonicalAsset(string asset)
+    {
+        try
+        {
+            return UsdSettlementConfiguration.CanonicalizeAsset(asset);
+        }
+        catch (ArgumentException)
+        {
+            return asset;
+        }
+    }
+
+    private static StablecoinSettlementTransferData MapStablecoinSettlementTransfer(
+        UsdSettlementTransferEntity transfer) =>
+        new()
+        {
+            Id = transfer.Id,
+            Status = MapStablecoinSettlementStatus(transfer.State),
+            // Read-only mapper: fall back to the raw stored asset instead of
+            // throwing so one out-of-band row can never 500 the whole listing.
+            DestinationAsset = TryCanonicalAsset(transfer.DestinationAsset),
+            DestinationChain = MapStablecoinChain(transfer.DestinationNetwork),
+            DestinationAddress = transfer.DestinationAddress,
+            SourceAmountSats = transfer.SourceAmountSats,
+            ExpectedOutputAtomic = transfer.ExpectedOutputAtomic,
+            DeliveredOutputAtomic = transfer.DeliveredOutputAtomic,
+            FeesPaidSats = transfer.StableLegFeeSats is null && transfer.ArkLegFeeSats is null
+                ? null
+                : (transfer.StableLegFeeSats ?? 0) + (transfer.ArkLegFeeSats ?? 0),
+            CreatedAt = transfer.CreatedAt,
+            UpdatedAt = transfer.UpdatedAt,
+            Message = transfer.Error
+        };
+
+    private static string MapStablecoinSettlementStatus(UsdSettlementState state) => state switch
+    {
+        UsdSettlementState.PreFunding => "pending",
+        UsdSettlementState.FundingStarted or
+            UsdSettlementState.ArkLegFunded or
+            UsdSettlementState.TbtcLocked or
+            UsdSettlementState.StableClaiming or
+            UsdSettlementState.BridgeSettling => "processing",
+        UsdSettlementState.Completed => "completed",
+        UsdSettlementState.Refunded => "refunded",
+        UsdSettlementState.Cancelled => "cancelled",
+        UsdSettlementState.ManualReview => "needs_review",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+    };
+
+    private static string? ParseStablecoinChain(string? chain) => chain?.Trim().ToLowerInvariant() switch
+    {
+        "arbitrum" => "Arbitrum One",
+        "ethereum" => "Ethereum",
+        "polygon" => "Polygon PoS",
+        "solana" => "Solana",
+        _ => chain
+    };
+
+    private static string MapStablecoinChain(string chain) => chain switch
+    {
+        "Arbitrum One" => "arbitrum",
+        "Ethereum" => "ethereum",
+        "Polygon PoS" => "polygon",
+        "Solana" => "solana",
+        _ => chain
+    };
+
+    // Enabled means "this is the store's active settlement method", matching
+    // the UI's toggle — never mere config presence: deactivated configs stay
+    // persisted dormant by design, and reporting them as enabled would tell
+    // an API consumer that USD settlement is running while the scheduler is
+    // actually settling elsewhere (or not at all).
+    private static StablecoinSettlementConfigData MapStablecoinSettlementConfig(
+        UsdSettlementConfig? config,
+        bool active,
+        UsdSettlementOption option) =>
+        config is null
+            ? new StablecoinSettlementConfigData
+            {
+                Enabled = false,
+                Available = option.Available,
+                UnavailableReason = option.UnavailableReason
+            }
+            : new StablecoinSettlementConfigData
+            {
+                Enabled = active,
+                Available = option.Available,
+                UnavailableReason = option.UnavailableReason,
+                ThresholdSats = config.ThresholdSats,
+                DestinationChain = MapStablecoinChain(config.DestinationChain),
+                DestinationAddress = config.DestinationAddress,
+                Asset = config.Asset
+            };
 
     #endregion
 

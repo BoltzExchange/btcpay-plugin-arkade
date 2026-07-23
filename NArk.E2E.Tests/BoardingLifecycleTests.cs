@@ -67,6 +67,17 @@ public class BoardingLifecycleTests : PlaywrightBaseTest
             () => $"boarding deposit never became visible (boardingSats={boardingSats})",
             TimeSpan.FromSeconds(1));
 
+        // The visible deposit must also surface in the overview's recent-activity
+        // feed as a Boarding entry (Pending until swept; the sweep below may race
+        // this check and already show Completed).
+        await WaitForVisibleSelectorAsync(
+            $"/plugins/ark/stores/{storeId}/overview",
+            "[data-testid='activity-row']:has([data-testid='activity-title']:has-text('Boarding'))");
+        var boardingBadge = await Page!.Locator(
+                "[data-testid='activity-row']:has([data-testid='activity-title']:has-text('Boarding'))")
+            .First.Locator("[data-testid='activity-badge']").InnerTextAsync();
+        Assert.Contains(boardingBadge.Trim(), new[] { "Pending", "Completed" });
+
         // Stage 2 — sweep: /suggest-coins already includes confirmed boarding UTXOs (they can
         // join a batch directly), so the balance split is the real sweep signal — boarding
         // drops to zero and available absorbs the swept amount minus batch fees. Mine between

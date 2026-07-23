@@ -1,0 +1,5 @@
+[bindings.csharp]
+cdylib_name = "boltz_client_bindings"
+namespace = "Boltz.Client"
+access_modifier = "public"
+omit_checksums = false

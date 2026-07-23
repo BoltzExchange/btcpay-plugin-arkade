@@ -1,5 +1,8 @@
+using Boltz.Client;
 using BTCPayServer.Data;
+using BTCPayServer.Plugins.Boltz.Arkade.Models;
 using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler;
+using BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement;
 using Microsoft.Playwright;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -7,10 +10,11 @@ using Xunit.Abstractions;
 
 namespace NArk.E2E.Tests;
 
+[Trait("Category", "Unit")]
 public class ArkadePaymentMethodConfigTests
 {
     [Fact]
-    public void SetSettlementOptionData_StoresGenericData()
+    public void SetSettlementOptionData_StoresGenericDataAndPrunesNullOrBlankValues()
     {
         var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
             .SetSettlementOptionData(
@@ -18,13 +22,92 @@ public class ArkadePaymentMethodConfigTests
                 new JObject
                 {
                     ["thresholdSats"] = "20000",
-                    ["empty"] = ""
+                    ["empty"] = "",
+                    ["cleared"] = JValue.CreateNull()
                 });
 
         var option = Assert.Single(config.SettlementOptions!);
         Assert.Equal(StoreSettlementOptionKeys.BitcoinMainchain, option.Type);
         Assert.Equal("20000", option.GetAdditionalData("thresholdSats"));
         Assert.Null(option.GetAdditionalData("empty"));
+        Assert.False(option.AdditionalData!.ContainsKey("cleared"));
+    }
+
+    [Fact]
+    public void ResolveActiveSettlement_ExplicitSelectionWins()
+    {
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject { [MainchainSettlementData.ThresholdKey] = "20000" })
+            .SetActiveSettlement(StoreSettlementOption.Usd);
+
+        Assert.Equal(StoreSettlementOptionKeys.Usd, config.ActiveSettlement);
+        Assert.Equal(StoreSettlementOption.Usd, config.ResolveActiveSettlement());
+    }
+
+    [Fact]
+    public void SetActiveSettlement_Null_MarksExplicitlyOff()
+    {
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject { [MainchainSettlementData.ThresholdKey] = "20000" })
+            .SetActiveSettlement(null);
+
+        Assert.Equal(StoreSettlementOptionKeys.None, config.ActiveSettlement);
+        Assert.Null(config.ResolveActiveSettlement());
+    }
+
+    [Fact]
+    public void ResolveActiveSettlement_WithoutStoredSelection_IsOff()
+    {
+        // Only an explicitly stored, recognized key activates a method: stored
+        // option data alone (or an unknown key) never turns settlement on.
+        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject { [MainchainSettlementData.ThresholdKey] = "20000" });
+
+        Assert.Null(config.ActiveSettlement);
+        Assert.Null(config.ResolveActiveSettlement());
+        Assert.Null((config with { ActiveSettlement = "unknown-key" }).ResolveActiveSettlement());
+    }
+
+    [Fact]
+    public void DeactivateSettlement_OnlyClearsWhenMethodIsActive()
+    {
+        var active = new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetActiveSettlement(StoreSettlementOption.BitcoinMainchain);
+
+        // Disabling the dormant method leaves the active one untouched.
+        Assert.Equal(
+            StoreSettlementOption.BitcoinMainchain,
+            active.DeactivateSettlement(StoreSettlementOption.Usd).ResolveActiveSettlement());
+
+        // Disabling the active method turns settlement off.
+        Assert.Null(active.DeactivateSettlement(StoreSettlementOption.BitcoinMainchain).ResolveActiveSettlement());
+    }
+
+    [Fact]
+    public void SetActiveSettlement_PreservesDormantMethodConfig()
+    {
+        var config = UsdSettlementConfiguration.Set(
+                new ArkadePaymentMethodConfig(WalletId: "wallet")
+                    .SetSettlementOptionData(
+                        StoreSettlementOption.BitcoinMainchain,
+                        new JObject { [MainchainSettlementData.ThresholdKey] = "20000" }),
+                new UsdSettlementConfig(
+                    50_000,
+                    UsdSettlementData.DefaultDestinationChain,
+                    "0xabc",
+                    UsdSettlementData.DefaultAsset))
+            .SetActiveSettlement(StoreSettlementOption.BitcoinMainchain);
+
+        // Switching to mainchain keeps the stablecoin destination stored so the
+        // merchant can switch back without re-entering it.
+        Assert.Equal("0xabc", UsdSettlementConfiguration.Get(config)!.DestinationAddress);
+        Assert.Equal("20000", config.GetSettlementOption(StoreSettlementOption.BitcoinMainchain)!.GetAdditionalData(MainchainSettlementData.ThresholdKey));
     }
 
     [Fact]
@@ -45,78 +128,208 @@ public class ArkadePaymentMethodConfigTests
     }
 
     [Fact]
-    public void SetSettlementOptionData_RemovesOptionWhenDataIsNull()
+    public void UsdSettlementConfiguration_RoundTripsStableTypeAndFields()
     {
-        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
-            .SetSettlementOptionData(
-                StoreSettlementOption.BitcoinMainchain,
-                new JObject { ["thresholdSats"] = "20000" })
-            .SetSettlementOptionData(StoreSettlementOption.BitcoinMainchain, null);
+        var config = UsdSettlementConfiguration.Set(
+            new ArkadePaymentMethodConfig(WalletId: "wallet")
+                .SetSettlementOptionData(
+                    StoreSettlementOption.BitcoinMainchain,
+                    new JObject { [MainchainSettlementData.ThresholdKey] = "20000" }),
+            new UsdSettlementConfig(
+                50_000,
+                UsdSettlementData.DefaultDestinationChain,
+                "0x1234567890abcdef1234567890abcdef12345678",
+                UsdSettlementData.UsdcAsset));
+        var serializer = BlobSerializer.CreateSerializer().Serializer;
 
-        Assert.Null(config.SettlementOptions);
+        var json = JObject.FromObject(config, serializer);
+        var roundTripped = json.ToObject<ArkadePaymentMethodConfig>(serializer)!;
+        var storedUsd = Assert.Single(
+            roundTripped.SettlementOptions!,
+            option => option.Type == StoreSettlementOptionKeys.Usd);
+        var parsed = UsdSettlementConfiguration.Get(roundTripped);
+
+        Assert.Equal(StoreSettlementOptionKeys.Usd, storedUsd.Type);
+        Assert.Equal("50000", storedUsd.GetAdditionalData(UsdSettlementData.ThresholdKey));
+        Assert.Equal(UsdSettlementData.DefaultDestinationChain, storedUsd.GetAdditionalData(UsdSettlementData.DestinationChainKey));
+        Assert.Equal("0x1234567890abcdef1234567890abcdef12345678", storedUsd.GetAdditionalData(UsdSettlementData.DestinationAddressKey));
+        Assert.Equal(UsdSettlementData.UsdcAsset, storedUsd.GetAdditionalData(UsdSettlementData.AssetKey));
+        Assert.Null(storedUsd.GetAdditionalData("slippageBps"));
+        Assert.NotNull(parsed);
+        Assert.Equal(50_000, parsed.ThresholdSats);
+        Assert.Contains(
+            roundTripped.SettlementOptions!,
+            option => option.Type == StoreSettlementOptionKeys.BitcoinMainchain);
+    }
+
+    [Theory]
+    [InlineData("usdt", UsdSettlementData.UsdtAsset)]
+    [InlineData("usdc", UsdSettlementData.UsdcAsset)]
+    public void UsdSettlementConfiguration_CanonicalizesSupportedAssets(
+        string inputAsset,
+        string expectedAsset)
+    {
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = "50000",
+                [UsdSettlementData.DestinationChainKey] = "  Arbitrum One  ",
+                [UsdSettlementData.DestinationAddressKey] = "  0x1234  ",
+                [UsdSettlementData.AssetKey] = inputAsset
+            }
+        });
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Equal(UsdSettlementData.DefaultDestinationChain, result.Config.DestinationChain);
+        Assert.Equal("0x1234", result.Config.DestinationAddress);
+        Assert.Equal(expectedAsset, result.Config.Asset);
     }
 
     [Fact]
-    public void SetSettlementOptionData_RemovesOptionWhenDataIsEmpty()
+    public void UsdSettlementConfiguration_IgnoresAndDropsLegacySlippage()
     {
-        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
-            .SetSettlementOptionData(
-                StoreSettlementOption.BitcoinMainchain,
-                new JObject { ["thresholdSats"] = "20000" })
-            .SetSettlementOptionData(
-                StoreSettlementOption.BitcoinMainchain,
-                new JObject { ["thresholdSats"] = "" });
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = "50000",
+                [UsdSettlementData.DestinationChainKey] = UsdSettlementData.DefaultDestinationChain,
+                [UsdSettlementData.DestinationAddressKey] = "0x1234",
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset,
+                ["slippageBps"] = "500"
+            }
+        });
 
-        Assert.Null(config.SettlementOptions);
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Null(UsdSettlementConfiguration.ToData(result.Config).Value<string>("slippageBps"));
+    }
+
+    [Theory]
+    [InlineData("Arbitrum One", BindingAsset.Usdt)]
+    [InlineData("Polygon PoS", BindingAsset.Usdt0)]
+    public void UsdtSettlement_ResolvesTheNativeRouteWithoutChangingThePublicAsset(
+        string chain,
+        BindingAsset expectedBindingAsset)
+    {
+        BindingDestination[] destinations =
+        [
+            new("Arbitrum One", BindingAsset.Usdt, BindingBridgeKind.Direct),
+            new("Polygon PoS", BindingAsset.Usdt0, BindingBridgeKind.Oft)
+        ];
+
+        var bindingAsset = UsdSettlementConfiguration.ResolveBindingAsset(
+            destinations,
+            chain,
+            UsdSettlementData.UsdtAsset);
+
+        Assert.Equal(expectedBindingAsset, bindingAsset);
     }
 
     [Fact]
-    public void SetSettlementOptionData_PreservesNonStringTokenTypes()
+    public void UsdSettlementConfiguration_LeavesNetworkUnselectedUntilConfigured()
     {
-        var nested = new JObject { ["nestedKey"] = "value" };
-        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
-            .SetSettlementOptionData(
-                StoreSettlementOption.BitcoinMainchain,
-                new JObject
-                {
-                    ["name"] = "test",
-                    ["amount"] = 42,
-                    ["enabled"] = true,
-                    ["nested"] = nested
-                });
+        var data = UsdSettlementConfiguration.GetViewData(
+            new ArkadePaymentMethodConfig(WalletId: "wallet"),
+            input: null);
 
-        var option = Assert.Single(config.SettlementOptions!);
-        Assert.Equal(JTokenType.String, option.AdditionalData!["name"]!.Type);
-        Assert.Equal("test", option.AdditionalData["name"]!.Value<string>());
-        Assert.Equal(JTokenType.Integer, option.AdditionalData["amount"]!.Type);
-        Assert.Equal(42, option.AdditionalData["amount"]!.Value<int>());
-        Assert.Equal(JTokenType.Boolean, option.AdditionalData["enabled"]!.Type);
-        Assert.True(option.AdditionalData["enabled"]!.Value<bool>());
-        Assert.Equal(JTokenType.Object, option.AdditionalData["nested"]!.Type);
-        Assert.Equal("value", option.AdditionalData["nested"]!["nestedKey"]!.Value<string>());
+        Assert.Null(data.Value<string>(UsdSettlementData.DestinationChainKey));
+        Assert.Equal(
+            UsdSettlementData.DefaultAsset,
+            data.Value<string>(UsdSettlementData.AssetKey));
+        Assert.Null(data.Value<string>("slippageBps"));
     }
 
-    [Fact]
-    public void SetSettlementOptionData_PrunesExplicitNullValues()
+    [Theory]
+    [InlineData("thresholdSats", "-1", "thresholdSats")]
+    [InlineData("thresholdSats", "1.5", "thresholdSats")]
+    [InlineData("destinationChain", null, "destinationChain")]
+    [InlineData("destinationAddress", "   ", "destinationAddress")]
+    [InlineData("asset", "DAI", "asset")]
+    public void UsdSettlementConfiguration_RejectsInvalidEnabledConfig(
+        string field,
+        string? value,
+        string expectedInvalidField)
     {
-        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
-            .SetSettlementOptionData(
-                StoreSettlementOption.BitcoinMainchain,
-                new JObject
-                {
-                    ["thresholdSats"] = "20000",
-                    ["cleared"] = JValue.CreateNull()
-                });
+        var data = new JObject
+        {
+            [UsdSettlementData.ThresholdKey] = "50000",
+            [UsdSettlementData.DestinationChainKey] = UsdSettlementData.DefaultDestinationChain,
+            [UsdSettlementData.DestinationAddressKey] = "0x1234",
+            [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
+        };
+        data[field] = value is null ? JValue.CreateNull() : value;
 
-        var option = Assert.Single(config.SettlementOptions!);
-        Assert.Equal("20000", option.GetAdditionalData("thresholdSats"));
-        Assert.False(option.AdditionalData!.ContainsKey("cleared"));
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput { Data = data });
+
+        Assert.False(result.IsValid);
+        Assert.Equal(expectedInvalidField, result.InvalidField);
+        Assert.NotNull(result.Error);
     }
 
-    [Fact]
-    public void SetSettlementOptionData_RemovesOptionWhenOnlyNullOrBlankValues()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void UsdSettlementConfiguration_BlankThresholdWithoutAddressSkipsOption(string? threshold)
     {
-        var config = new ArkadePaymentMethodConfig(WalletId: "wallet")
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = threshold is null ? JValue.CreateNull() : threshold,
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
+            }
+        });
+
+        Assert.True(result.IsValid);
+        Assert.Null(result.Config);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0")]
+    public void UsdSettlementConfiguration_BlankOrZeroThresholdUsesSwapMinimum(string? threshold)
+    {
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = threshold is null ? JValue.CreateNull() : threshold,
+                [UsdSettlementData.DestinationChainKey] = UsdSettlementData.DefaultDestinationChain,
+                [UsdSettlementData.DestinationAddressKey] = "0x1234",
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
+            }
+        });
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Equal(0, result.Config.ThresholdSats);
+    }
+
+    // The same removal path fires for a null payload, a payload whose only
+    // key is blank, and a payload of exclusively null/blank values.
+    [Fact]
+    public void SetSettlementOptionData_RemovesOptionWhenDataIsEffectivelyEmpty()
+    {
+        ArkadePaymentMethodConfig WithOption() => new ArkadePaymentMethodConfig(WalletId: "wallet")
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject { ["thresholdSats"] = "20000" });
+
+        Assert.Null(WithOption()
+            .SetSettlementOptionData(StoreSettlementOption.BitcoinMainchain, null)
+            .SettlementOptions);
+
+        Assert.Null(WithOption()
+            .SetSettlementOptionData(
+                StoreSettlementOption.BitcoinMainchain,
+                new JObject { ["thresholdSats"] = "" })
+            .SettlementOptions);
+
+        Assert.Null(new ArkadePaymentMethodConfig(WalletId: "wallet")
             .SetSettlementOptionData(
                 StoreSettlementOption.BitcoinMainchain,
                 new JObject
@@ -124,9 +337,8 @@ public class ArkadePaymentMethodConfigTests
                     ["a"] = "",
                     ["b"] = "   ",
                     ["c"] = JValue.CreateNull()
-                });
-
-        Assert.Null(config.SettlementOptions);
+                })
+            .SettlementOptions);
     }
 
     [Fact]
@@ -193,8 +405,9 @@ public class SettlementConfigurationUiTests : PlaywrightBaseTest
         await Page.ClickAsync("[data-testid='hd-wallet-option']");
         await Page.WaitForSelectorAsync("#createNew [data-settlement-step]:not(.d-none)");
         Assert.Equal(0, await Page.Locator("#createNew [data-testid='create-wallet-next-btn']").CountAsync());
-        Assert.True(await Page.Locator("#createNew [data-testid='settlement-threshold-input']").IsVisibleAsync());
 
+        await Page.CheckAsync("#createNew input[name='activeSettlement'][value='bitcoin-mainchain']");
+        Assert.True(await Page.Locator("#createNew [data-testid='settlement-threshold-input']").IsVisibleAsync());
         await Page.FillAsync($"#createNew {MainchainThresholdInput}", "25000");
         await Page.ClickAsync("#createNew [data-testid='create-wallet-btn']");
 

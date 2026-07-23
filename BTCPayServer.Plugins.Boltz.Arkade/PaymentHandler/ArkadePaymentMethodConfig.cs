@@ -6,10 +6,34 @@ public record ArkadePaymentMethodConfig(
     string WalletId,
     bool? WalletBackedUp = null,
     bool AllowSubDustAmounts = false,
-    List<StoreSettlementOptionConfig>? SettlementOptions = null)
+    List<StoreSettlementOptionConfig>? SettlementOptions = null,
+    string? ActiveSettlement = null)
 {
     public StoreSettlementOptionConfig? GetSettlementOption(StoreSettlementOption option) =>
         SettlementOptions?.FirstOrDefault(o => o.Type == StoreSettlementOptionKeys.GetKey(option));
+
+    // Settlement methods are mutually exclusive: at most one moves funds at a
+    // time. Each method's own config still persists (dormant) so switching
+    // methods preserves the merchant's entered values. Only an explicitly
+    // stored, recognized key activates a method; anything else is off.
+    public StoreSettlementOption? ResolveActiveSettlement() =>
+        ActiveSettlement is { Length: > 0 } key &&
+        StoreSettlementOptionKeys.TryGetOption(key, out var option)
+            ? option
+            : null;
+
+    public ArkadePaymentMethodConfig SetActiveSettlement(StoreSettlementOption? option) =>
+        this with
+        {
+            ActiveSettlement = option is { } value
+                ? StoreSettlementOptionKeys.GetKey(value)
+                : StoreSettlementOptionKeys.None
+        };
+
+    // Turning a method off only clears the active selection when that method was
+    // the active one, so disabling a dormant method never stops the active one.
+    public ArkadePaymentMethodConfig DeactivateSettlement(StoreSettlementOption option) =>
+        ResolveActiveSettlement() == option ? SetActiveSettlement(null) : this;
 
     public ArkadePaymentMethodConfig SetSettlementOptionData(
         StoreSettlementOption option,
@@ -64,17 +88,39 @@ public record StoreSettlementOptionConfig(
 
 public static class StoreSettlementOptionKeys
 {
+    public const string None = "none";
     public const string BitcoinMainchain = "bitcoin-mainchain";
+    public const string Usd = "usd";
+
+    private static readonly Dictionary<StoreSettlementOption, string> Keys = new()
+    {
+        [StoreSettlementOption.BitcoinMainchain] = BitcoinMainchain,
+        [StoreSettlementOption.Usd] = Usd
+    };
 
     public static string GetKey(StoreSettlementOption option) =>
-        option switch
+        Keys.TryGetValue(option, out var key)
+            ? key
+            : throw new ArgumentOutOfRangeException(nameof(option), option, "Unknown settlement option.");
+
+    public static bool TryGetOption(string? key, out StoreSettlementOption option)
+    {
+        foreach (var (candidate, candidateKey) in Keys)
         {
-            StoreSettlementOption.BitcoinMainchain => BitcoinMainchain,
-            _ => throw new ArgumentOutOfRangeException(nameof(option), option, "Unknown settlement option.")
-        };
+            if (candidateKey == key)
+            {
+                option = candidate;
+                return true;
+            }
+        }
+
+        option = default;
+        return false;
+    }
 }
 
 public enum StoreSettlementOption
 {
-    BitcoinMainchain
+    BitcoinMainchain,
+    Usd
 }

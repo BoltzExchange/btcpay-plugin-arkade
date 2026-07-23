@@ -13,7 +13,8 @@ namespace NArk.E2E.Tests;
 /// address no longer forces Batch. In Arkade mode an amount within the Boltz chain-swap limits
 /// settles via an Arkade→BTC chain swap (swap UX + chain-swap fee), while an amount outside those
 /// limits auto-falls back to Batch (batch UX + batch fee) — matching the backend /send behavior.
-/// Neither case dead-ends the user with a disabled Send.
+/// Neither case dead-ends the user with a disabled Send. Both branches run against the same
+/// funded wallet and wizard page — only the amount changes between them.
 /// </summary>
 [Collection("Arkade Plugin Tests")]
 public class SendWizardBitcoinTests : PlaywrightBaseTest
@@ -28,21 +29,32 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task SendWizard_BitcoinAddress_WithinLimits_KeepsArkadeTypeAndShowsSwapFee()
+    public async Task SendWizard_BitcoinAddress_SwapWithinLimits_BatchFallbackOutside()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
+        var services = _fixture.ServerTester!.PayTester.ServiceProvider;
+        var limitsValidator = services.GetRequiredService<BoltzLimitsValidator>();
+        var chainLimits = await limitsValidator.GetChainLimitsAsync(isBtcToArk: false) ??
+            throw new InvalidOperationException("Boltz ARK to BTC chain limits were unavailable.");
+
+        // One sat below the chain-swap minimum → out of limits, so the send must fall back to Batch.
+        var belowMinSats = chainLimits.MinAmount - 1;
+        // Fund comfortably above both probed amounts so estimates have coins + fee headroom.
+        var fundingSats = Math.Max(belowMinSats, 20_000) + 100_000;
+
         var storeId = await CreateStoreWithArkWalletAsync();
 
         var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
-        await PayArkadeInvoiceAsync(client, storeId, 200_000);
+        await PayArkadeInvoiceAsync(client, storeId, fundingSats);
         var bitcoinAddress = await GetNewRegtestBitcoinAddressAsync();
 
-        await OpenSendWithSpendableCoinsAsync(storeId, 20_000);
+        await OpenSendWithSpendableCoinsAsync(storeId, Math.Max(belowMinSats, 20_000));
         await Page!.FillAsync(".destination-input", bitcoinAddress);
-        // 0.0002 BTC (20k sats) is within the regtest chain-swap limits (GreenfieldBitcoinTests
-        // settles this exact amount via chain swap).
+
+        // Branch 1 — within limits. 0.0002 BTC (20k sats) is within the regtest chain-swap
+        // limits (GreenfieldBitcoinTests settles this exact amount via chain swap).
         await Page.FillAsync(".amount-input", "0.0002");
 
         // The destination badge must read as a swap (not batch-only) for an in-limits Arkade send.
@@ -69,37 +81,12 @@ public class SendWizardBitcoinTests : PlaywrightBaseTest
 
         Assert.True(await Page.Locator("#send-btn").IsEnabledAsync(),
             "Send should be enabled once the swap fee estimate loads");
-    }
 
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task SendWizard_BitcoinAddress_OutsideLimits_FallsBackToBatch()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
+        // Branch 2 — outside limits: refill the amount below the chain-swap minimum and the
+        // badge must flip to batch settlement after the re-estimate.
+        var belowMinBtc = (belowMinSats / 100_000_000m).ToString("0.00000000", CultureInfo.InvariantCulture);
+        await Page.FillAsync(".amount-input", belowMinBtc);
 
-        var services = _fixture.ServerTester!.PayTester.ServiceProvider;
-        var limitsValidator = services.GetRequiredService<BoltzLimitsValidator>();
-        var chainLimits = await limitsValidator.GetChainLimitsAsync(isBtcToArk: false) ??
-            throw new InvalidOperationException("Boltz ARK to BTC chain limits were unavailable.");
-
-        // One sat below the chain-swap minimum → out of limits, so the send must fall back to Batch.
-        var belowMinSats = chainLimits.MinAmount - 1;
-        // Fund comfortably above the send amount so the Batch estimate has coins + fee headroom.
-        var fundingSats = belowMinSats + 100_000;
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-
-        var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
-        await PayArkadeInvoiceAsync(client, storeId, fundingSats);
-        var bitcoinAddress = await GetNewRegtestBitcoinAddressAsync();
-        var amountBtc = (belowMinSats / 100_000_000m).ToString("0.00000000", CultureInfo.InvariantCulture);
-
-        await OpenSendWithSpendableCoinsAsync(storeId, belowMinSats);
-        await Page!.FillAsync(".destination-input", bitcoinAddress);
-        await Page.FillAsync(".amount-input", amountBtc);
-
-        // Out of chain-swap limits: the badge must flip to batch settlement after the estimate.
         await Page.WaitForSelectorAsync(
             ".destination-type-badge:has-text('Bitcoin (Batch)')",
             new PageWaitForSelectorOptions { Timeout = 30_000 });

@@ -8,8 +8,10 @@ namespace NArk.E2E.Tests;
 
 /// <summary>
 /// Covers the plugin's JSON API endpoints (parse-destination,
-/// estimate-fees, suggest-coins, show-private-key, etc.). These don't
-/// involve BTCPay's invoice-creation pipeline.
+/// show-private-key). These don't involve BTCPay's invoice-creation
+/// pipeline. All parse-destination classifications share one store — the
+/// endpoint is stateless per request, so a fresh wallet per input buys
+/// nothing.
 /// </summary>
 [Collection("Arkade Plugin Tests")]
 public class ApiEndpointTests : PlaywrightBaseTest
@@ -23,95 +25,49 @@ public class ApiEndpointTests : PlaywrightBaseTest
     }
 
     /// <summary>
-    /// POST /parse-destination must identify a valid Arkade address as
-    /// the ArkAddress type and return ResolvedAddress matching the input.
+    /// POST /parse-destination across the supported input shapes:
+    /// an Arkade address resolves as ArkAddress, a BOLT11 invoice as
+    /// LightningInvoice, while a bare BTC address (chain-swap destinations
+    /// go through a separate flow) and garbage are rejected with
+    /// IsValid=false rather than a throw — the wizard surfaces the Error
+    /// string to the user.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task ParseDestination_IdentifiesArkAddress()
+    public async Task ParseDestination_ClassifiesSupportedAndRejectsInvalidInputs()
     {
         _fixture.Initialize(this);
         await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
 
-        // Donor store with a deterministic Arkade address.
         var storeId = await CreateStoreWithArkWalletAsync();
         var arkAddr = await GetStoreReceiveAddressAsync(_fixture.ServerTester!, storeId);
 
-        var resp = await Page.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["Content-Type"] = "application/json",
-                    ["RequestVerificationToken"] = (await GetAntiforgeryTokenAsync()) ?? ""
-                },
-                DataObject = new { destination =arkAddr, amountBtc = (decimal?)null }
-            });
-
-        Assert.True(resp.Ok, $"parse-destination returned {resp.Status}");
-        var json = await resp.JsonAsync();
-        Assert.NotNull(json);
+        var arkJson = await ParseDestinationAsync(storeId, arkAddr);
         // ParseDestinationResponse.Type is the SendDestinationType enum
         // stringified. For a bare Ark address that's "ArkAddress".
-        var type = json!.Value.GetProperty("type").GetString();
-        Assert.Equal("ArkAddress", type);
-    }
-
-    /// <summary>
-    /// POST /parse-destination on a random LND BOLT11 invoice should
-    /// return type LightningInvoice and surface the amount.
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ParseDestination_IdentifiesLightningInvoice()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
+        Assert.Equal("ArkAddress", arkJson.GetProperty("type").GetString());
 
         var bolt11 = await NArk.Tests.End2End.Common.DockerHelper.CreateLndInvoice(
             amtSats: 1_000, expirySecs: 300);
+        var lnJson = await ParseDestinationAsync(storeId, bolt11);
+        Assert.Equal("LightningInvoice", lnJson.GetProperty("type").GetString());
+        Assert.True(lnJson.GetProperty("isLightning").GetBoolean(),
+            "isLightning should be true for a bolt11 invoice");
 
-        var resp = await Page!.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["Content-Type"] = "application/json",
-                    ["RequestVerificationToken"] = (await GetAntiforgeryTokenAsync()) ?? ""
-                },
-                DataObject = new { destination =bolt11, amountBtc = (decimal?)null }
-            });
+        var btcAddr = new Key().GetAddress(ScriptPubKeyType.TaprootBIP86, Network.RegTest).ToString();
+        var btcJson = await ParseDestinationAsync(storeId, btcAddr);
+        Assert.False(
+            btcJson.TryGetProperty("isValid", out var btcValid) && btcValid.GetBoolean(),
+            "bare BTC address should not be a valid /send destination");
 
-        Assert.True(resp.Ok, $"parse-destination returned {resp.Status}");
-        var json = await resp.JsonAsync();
-        var type = json!.Value.GetProperty("type").GetString();
-        Assert.Equal("LightningInvoice", type);
-        var isLightning = json.Value.GetProperty("isLightning").GetBoolean();
-        Assert.True(isLightning, "isLightning should be true for a bolt11 invoice");
+        var garbageJson = await ParseDestinationAsync(storeId, "obviously-not-a-real-address");
+        Assert.False(
+            garbageJson.TryGetProperty("isValid", out var garbageValid) && garbageValid.GetBoolean(),
+            "garbage destination should not be marked valid");
     }
 
-    /// <summary>
-    /// POST /parse-destination on a bare BTC address should reject it —
-    /// the /send page only supports off-chain destinations (Ark, LN,
-    /// LNURL, or BIP21 carrying ark=/lightning= params). Chain-swap
-    /// destinations go through a separate flow.
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ParseDestination_RejectsBareBitcoinAddress()
+    private async Task<JsonElement> ParseDestinationAsync(string storeId, string destination)
     {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-
-        var key = new Key();
-        var btcAddr = key.GetAddress(ScriptPubKeyType.TaprootBIP86, Network.RegTest).ToString();
-
         var resp = await Page!.Context.APIRequest.PostAsync(
             new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,
             new APIRequestContextOptions
@@ -121,48 +77,13 @@ public class ApiEndpointTests : PlaywrightBaseTest
                     ["Content-Type"] = "application/json",
                     ["RequestVerificationToken"] = (await GetAntiforgeryTokenAsync()) ?? ""
                 },
-                DataObject = new { destination = btcAddr, amountBtc = (decimal?)null }
+                DataObject = new { destination, amountBtc = (decimal?)null }
             });
 
-        Assert.True(resp.Ok, $"parse-destination returned {resp.Status}");
+        Assert.True(resp.Ok, $"parse-destination({destination}) returned {resp.Status}: {await resp.TextAsync()}");
         var json = await resp.JsonAsync();
-        var isValid = json!.Value.TryGetProperty("isValid", out var v) && v.GetBoolean();
-        Assert.False(isValid, "bare BTC address should not be a valid /send destination");
-    }
-
-    /// <summary>
-    /// POST /parse-destination on garbage input should return IsValid=false
-    /// rather than throw — the wizard surfaces this Error string to the user.
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task ParseDestination_RejectsInvalidDestination()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-
-        var resp = await Page!.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/parse-destination").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["Content-Type"] = "application/json",
-                    ["RequestVerificationToken"] = (await GetAntiforgeryTokenAsync()) ?? ""
-                },
-                DataObject = new { destination ="obviously-not-a-real-address", amountBtc = (decimal?)null }
-            });
-
-        if (!resp.Ok)
-        {
-            var body = await resp.TextAsync();
-            throw new InvalidOperationException($"parse-destination returned {resp.Status}: {body}");
-        }
-        var json = await resp.JsonAsync();
-        var isValid = json!.Value.TryGetProperty("isValid", out var v) && v.GetBoolean();
-        Assert.False(isValid, "garbage destination should not be marked valid");
+        Assert.NotNull(json);
+        return json!.Value;
     }
 
     /// <summary>
@@ -196,5 +117,4 @@ public class ApiEndpointTests : PlaywrightBaseTest
         var revealedMnemonic = await Page.GetAttributeAsync("#RecoveryPhrase", "data-mnemonic");
         Assert.Equal(expectedMnemonic, revealedMnemonic);
     }
-
 }

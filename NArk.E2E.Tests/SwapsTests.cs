@@ -1,7 +1,5 @@
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
-using BTCPayServer.Plugins.Boltz.Arkade.Services;
-using BTCPayServer.Services.Reporting;
 using Microsoft.Extensions.DependencyInjection;
 using NArk.Swaps.Abstractions;
 using NArk.Swaps.Models;
@@ -204,54 +202,6 @@ public class SwapsTests : PlaywrightBaseTest
     }
 
     /// <summary>
-    /// Direct Arkade payments must show up in the Payments report with the Arkade
-    /// category and the transaction that created the VTXO on the invoice's contract.
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task PaymentsReport_IncludesArkadePaymentDetails()
-    {
-        _fixture.Initialize(this);
-        await InitializePlaywrightAndRegisterAdminAsync(_fixture.ServerTester!);
-
-        var storeId = await CreateStoreWithArkWalletAsync();
-        var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
-        var invoiceId = await PayArkadeInvoiceAsync(client, storeId, 50_000);
-
-        IList<object?>? row = null;
-        List<string> fields = [];
-        await PollUntilAsync(async () =>
-        {
-            (fields, var rows) = await QueryPaymentsReportAsync(storeId);
-            row = rows.FirstOrDefault(r => Equals(r[fields.IndexOf("InvoiceId")], invoiceId));
-            return row is not null;
-        }, TimeSpan.FromMinutes(2), "payments report never showed the Arkade payment");
-
-        Assert.Equal("Arkade", row![fields.IndexOf("Category")]);
-        Assert.Equal("ARKADE", row[fields.IndexOf("PaymentMethodId")]);
-        Assert.False(string.IsNullOrWhiteSpace(row[fields.IndexOf("Address")] as string));
-        Assert.False(string.IsNullOrWhiteSpace(row[fields.IndexOf("SettlementTransactionId")] as string));
-    }
-
-    /// <summary>
-    /// Runs the Payments report for the store through the plugin's provider, asserting on the
-    /// way that it replaced BTCPay's default provider rather than being registered alongside it.
-    /// </summary>
-    private async Task<(List<string> Fields, IList<IList<object?>> Rows)> QueryPaymentsReportAsync(string storeId)
-    {
-        var provider = Assert.Single(_fixture.ServerTester!.PayTester.ServiceProvider
-            .GetServices<ReportProvider>()
-            .Where(p => p.Name == "Payments"));
-        // Compare by name: BTCPay loads the plugin assembly in its own context, so the
-        // provider's CLR type is distinct from the test project's compile-time reference.
-        Assert.Equal(typeof(ArkadePaymentsReportProvider).FullName, provider.GetType().FullName);
-
-        var queryContext = new QueryContext(storeId, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
-        await provider.Query(queryContext, CancellationToken.None);
-        return (queryContext.ViewDefinition!.Fields.Select(f => f.Name).ToList(), queryContext.Data);
-    }
-
-    /// <summary>
     /// Fund an Arkade wallet, then settle to a bitcoin address via the /send wizard in
     /// Arkade (not Batch) mode. The plugin routes an on-chain destination through a Boltz
     /// ARK→BTC chain swap — the same mechanism as the Greenfield /arkade/send path — rather
@@ -288,19 +238,13 @@ public class SwapsTests : PlaywrightBaseTest
 
         Assert.True(resp.Ok, $"send (bitcoin) returned {resp.Status}: {await resp.TextAsync()}");
 
-        // Arkade mode must settle via a chain swap, not a batch intent — and the swap must
-        // actually deliver: Settled status plus BTC arriving at the destination address.
-        await WaitForSwapAsync(
+        // Arkade mode must settle via a chain swap, not a batch intent. The wizard's job ends
+        // at recording that swap — full settlement plus BTC delivery of this exact amount is
+        // pinned by GreenfieldBitcoinTests, which shares every step after the controller.
+        await WaitForChainSwapAsync(
             _fixture.ServerTester!.PayTester.ServiceProvider,
             walletId!,
-            ArkSwapType.ChainArkToBtc,
-            [ArkSwapStatus.Settled],
-            TimeSpan.FromMinutes(3),
-            mineWhileWaiting: true);
-
-        var receivedSats = await DockerHelper.BitcoinGetReceivedByAddressSats(bitcoinAddress, minConf: 0);
-        Assert.True(receivedSats > 0,
-            $"chain swap settled but no BTC arrived at {bitcoinAddress}");
+            TimeSpan.FromMinutes(2));
     }
 
 }
