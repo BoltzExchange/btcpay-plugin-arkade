@@ -22,37 +22,35 @@ run:
 
 dev: setup run
 
+# Optional git-ignored .env.local provides API-keyed fork RPC endpoints
+# (ARBITRUM_E2E_RPC_URL / ETHEREUM_E2E_RPC_URL) for local runs; without it
+# the regtest defaults apply.
+-include .env.local
+export ARBITRUM_E2E_RPC_URL ETHEREUM_E2E_RPC_URL
+
+# BoltzExchange/regtest, stock ci profile (EVM forks included) plus the ark
+# profile for arkd/fulmine and the backend's ARK/BTC pair.
 regtest:
-	node submodules/NNark/regtest/regtest.mjs start --profile boltz,delegate
+	cd submodules/regtest && COMPOSE_PROFILES=ci,ark ./start.sh
+	@echo "waiting for the ARK/BTC pair..."
+	@timeout 180 sh -c 'until curl -sf http://localhost:9001/v2/swap/submarine 2>/dev/null | grep -q ARK; do sleep 2; done' || \
+		{ echo "boltz backend did not expose an ARK pair" >&2; docker logs --tail 50 boltz-backend >&2; exit 1; }
 
-regtest-stop:
-	node submodules/NNark/regtest/regtest.mjs stop
+regtest-stop regtest-clean:
+	cd submodules/regtest && COMPOSE_PROFILES=ci,ark ./stop.sh
 
-regtest-clean:
-	node submodules/NNark/regtest/regtest.mjs clean
-
-# The E2E suite's Postgres lives outside the regtest stack (CI provides it as
-# a service container); ensure a matching one locally.
-test-db:
-	@docker start btcpay-e2e-postgres 2>/dev/null || docker run -d \
-		--name btcpay-e2e-postgres \
-		-e POSTGRES_USER=postgres \
-		-e POSTGRES_PASSWORD=postgres \
-		-e POSTGRES_DB=btcpay_e2e_test \
-		-p 5432:5432 \
-		postgres:16
-
-# Requires the regtest stack (make regtest). ConfigBuilder must run after the
-# test project is built so it can write appsettings.dev.json into the test bin
-# (same ordering as CI).
-test: test-db
+# Requires the regtest stack (make regtest); Postgres and NBXplorer come from
+# it. ConfigBuilder must run after the test project is built so it can write
+# appsettings.dev.json into the test bin (same ordering as CI).
+test:
 	dotnet build NArk.E2E.Tests/NArk.E2E.Tests.csproj
 	$(MAKE) appsettings
-	TESTS_BTCRPCCONNECTION="server=http://127.0.0.1:18443;admin1:123" \
+	$(eval BTC_COOKIE := $(shell docker exec boltz-bitcoind cat /app/bitcoin/regtest/.cookie))
+	TESTS_BTCRPCCONNECTION="server=http://127.0.0.1:18443;$(BTC_COOKIE)" \
 	TESTS_BTCNBXPLORERURL="http://127.0.0.1:32838/" \
-	TESTS_POSTGRES="Host=localhost;Port=5432;Database=btcpay_e2e_test;Username=postgres;Password=postgres" \
+	TESTS_POSTGRES="User ID=boltz;Password=boltz;Include Error Detail=true;Host=127.0.0.1;Port=5432;Database=btcpayserver" \
+	TESTS_EXPLORER_POSTGRES="User ID=boltz;Password=boltz;Include Error Detail=true;Host=127.0.0.1;Port=5432;Database=nbxplorer" \
 	TESTS_HOSTNAME="127.0.0.1" \
-	ARKADE_CHEAT_ARK_CONTAINER="$$(docker ps --format '{{.Names}}' | grep -m1 -x -e arkd -e ark)" \
 	dotnet test NArk.E2E.Tests/NArk.E2E.Tests.csproj --no-build --logger "console;verbosity=normal"
 
 migration:
@@ -80,4 +78,4 @@ gh-release: release
 clean:
 	rm -rf ./publish ./release
 
-.PHONY: setup appsettings build run dev regtest regtest-stop regtest-clean test test-db migration release gh-release clean
+.PHONY: setup appsettings build run dev regtest regtest-stop regtest-clean test migration release gh-release clean

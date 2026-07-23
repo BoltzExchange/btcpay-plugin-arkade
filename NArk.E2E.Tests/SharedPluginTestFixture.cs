@@ -35,13 +35,14 @@ public class SharedPluginTestFixture : IDisposable
         // ServerTester.StartAsync builds the host config.
         Environment.SetEnvironmentVariable("BTCPAY_ARKINTENTPOLLSECONDS", "5");
 
-        // Denigiri's regtest VTXOs expire sooner than the production renewal threshold.
+        // The regtest stack's VTXOs expire sooner than the production renewal threshold.
         // Keep the fast cadence for imported/unrolled note redemption, but shorten the
         // threshold so ordinary funded VTXOs are not continuously reserved for renewal.
         Environment.SetEnvironmentVariable("BTCPAY_ARKINTENTTHRESHOLDSECONDS", "1");
 
         var testDir = Path.Combine(Directory.GetCurrentDirectory(), "ArkadePluginTests");
         ServerTester = testInstance.CreateServerTester(testDir, newDb: true);
+        PlaywrightBaseTest.WriteArkNetworkOverride(testDir);
         // Load plugins in an isolated AssemblyLoadContext — matches the
         // production load model AND matches rockstardev's reference
         // fixture.

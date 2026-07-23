@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Text.Json;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using Microsoft.Playwright;
+using NArk.Tests.End2End.Common;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -44,7 +46,7 @@ public class PayoutBatchTests : PlaywrightBaseTest
         Assert.Equal(PayoutState.InProgress, inProgress.State);
         Assert.NotNull(inProgress.PaymentProof);
 
-        // Once denigiri finalizes the batch, the settlement listener completes the payout and
+        // Once arkd finalizes the batch, the settlement listener completes the payout and
         // upgrades the proof to the batch's on-chain commitment txid.
         var settled = await PollPayoutStateAsync(
             client, storeId, payout.Id, [PayoutState.Completed], TimeSpan.FromMinutes(2));
@@ -61,22 +63,70 @@ public class PayoutBatchTests : PlaywrightBaseTest
 
         var (client, storeId, payout) = await CreateApprovedPayoutWithFundsAsync();
 
-        await SubmitBatchSendForPayoutAsync(storeId, payout);
+        // arkd runs single-participant rounds back-to-back, so a pending intent
+        // is normally swept into a batch within seconds — faster than the UI
+        // cancel below can land. Configuring a far-future scheduled session
+        // pauses rounds entirely, making the cancel window deterministic.
+        await PauseArkdRoundsAsync();
+        try
+        {
+            await SubmitBatchSendForPayoutAsync(storeId, payout);
 
-        var inProgress = await client.GetStorePayout(storeId, payout.Id);
-        Assert.Equal(PayoutState.InProgress, inProgress.State);
+            var inProgress = await client.GetStorePayout(storeId, payout.Id);
+            Assert.Equal(PayoutState.InProgress, inProgress.State);
 
-        // Cancel the pending intent from the Intents page (the submit lands there already).
-        // The coins return to the wallet, so the settlement listener must revert the payout
-        // for retry instead of leaving it marked paid with an unpaid recipient.
-        Page!.Dialog += async (_, dialog) => await dialog.AcceptAsync();
-        var cancelButton = Page.Locator("button[title='Cancel Intent']").First;
-        await cancelButton.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-        await cancelButton.ClickAsync();
+            // Cancel the pending intent from the Intents page (the submit lands there already).
+            // The coins return to the wallet, so the settlement listener must revert the payout
+            // for retry instead of leaving it marked paid with an unpaid recipient.
+            Page!.Dialog += async (_, dialog) => await dialog.AcceptAsync();
+            var cancelButton = Page.Locator("button[title='Cancel Intent']").First;
+            await cancelButton.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await cancelButton.ClickAsync();
 
-        var reverted = await PollPayoutStateAsync(
-            client, storeId, payout.Id, [PayoutState.AwaitingPayment], TimeSpan.FromMinutes(2));
-        Assert.Equal(PayoutState.AwaitingPayment, reverted.State);
+            var reverted = await PollPayoutStateAsync(
+                client, storeId, payout.Id, [PayoutState.AwaitingPayment], TimeSpan.FromMinutes(2));
+            Assert.Equal(PayoutState.AwaitingPayment, reverted.State);
+        }
+        finally
+        {
+            await ResumeArkdRoundsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Pauses arkd's continuous rounds by scheduling the next session far in the
+    /// future. The arkd CLI's scheduled-session update sends unix timestamps the
+    /// v0.9.10 admin API rejects, so the REST endpoint is called directly (via the
+    /// stack's scripts container — the arkd image ships no curl).
+    /// </summary>
+    private static async Task PauseArkdRoundsAsync()
+    {
+        var start = DateTimeOffset.UtcNow.AddHours(1);
+        var payload = JsonSerializer.Serialize(new
+        {
+            config = new
+            {
+                startTime = start.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                endTime = start.AddSeconds(30).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                duration = 30,
+                period = 3600,
+                roundMinParticipantsCount = 1,
+                roundMaxParticipantsCount = 128
+            }
+        });
+        var output = await DockerHelper.Exec("boltz-scripts",
+        [
+            "curl", "-s", "-X", "POST", "http://arkd:7071/v1/admin/scheduledSession",
+            "-H", "Content-Type: application/json", "-d", payload
+        ]);
+        if (output.Contains("\"code\""))
+            throw new InvalidOperationException($"pausing arkd rounds failed: {output.Trim()}");
+    }
+
+    private static async Task ResumeArkdRoundsAsync()
+    {
+        var container = await ResolveArkdContainerAsync();
+        await DockerHelper.Exec(container, ["arkd", "scheduled-session", "clear"]);
     }
 
     // --- helpers ---

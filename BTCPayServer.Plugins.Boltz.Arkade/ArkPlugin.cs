@@ -326,9 +326,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton<ICheckoutModelExtension>(sp => sp.GetRequiredService<ArkadeCheckoutModelExtension>());
         services.AddSingleton<IGlobalCheckoutModelExtension>(sp => sp.GetRequiredService<ArkadeCheckoutModelExtension>());
 
-        services.AddSingleton<ArkadeCheckoutCheatModeExtension>();
-        services.AddSingleton<ICheckoutCheatModeExtension>(sp => sp.GetRequiredService<ArkadeCheckoutCheatModeExtension>());
-
         services.AddSingleton<ArkContractInvoiceListener>();
         services.AddHostedService(sp => sp.GetRequiredService<ArkContractInvoiceListener>());
 

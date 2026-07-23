@@ -16,8 +16,21 @@ namespace NArk.Tests.End2End.Common;
 /// </summary>
 public static class DockerHelper
 {
-    private static readonly string[] BitcoinCliArgs =
-        ["bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123"];
+    /// <summary>
+    /// Container and CLI conventions of the BoltzExchange/regtest stack
+    /// (submodules/regtest): bitcoind uses cookie auth inside its datadir and
+    /// the funded server wallet is named "regtest"; the client-side LND is
+    /// lnd-1 with its lnddir under /app/lnd.
+    /// </summary>
+    public const string BitcoinContainer = "boltz-bitcoind";
+
+    public const string LndContainer = "boltz-lnd-1";
+
+    public static readonly string[] BitcoinCliArgs =
+        ["bitcoin-cli", "-regtest", "-datadir=/app/bitcoin", "-rpcwallet=regtest"];
+
+    public static readonly string[] LndCliArgs =
+        ["lncli", "--network=regtest", "--lnddir=/app/lnd"];
 
     public static async Task<string> Exec(string container, string[] args, CancellationToken ct = default)
     {
@@ -29,7 +42,7 @@ public static class DockerHelper
     }
 
     public static async Task MineBlocks(int count = 1, CancellationToken ct = default)
-        => await Exec("bitcoin", [.. BitcoinCliArgs, "-generate", count.ToString(CultureInfo.InvariantCulture)], ct);
+        => await Exec(BitcoinContainer, [.. BitcoinCliArgs, "-generate", count.ToString(CultureInfo.InvariantCulture)], ct);
 
     /// <summary>
     /// Total sats received by <paramref name="address"/> with at least
@@ -40,7 +53,7 @@ public static class DockerHelper
         string address, int minConf = 0, CancellationToken ct = default)
     {
         var result = await Cli.Wrap("docker")
-            .WithArguments(["exec", "bitcoin", .. BitcoinCliArgs, "getreceivedbyaddress", address, minConf.ToString(CultureInfo.InvariantCulture)])
+            .WithArguments(["exec", BitcoinContainer, .. BitcoinCliArgs, "getreceivedbyaddress", address, minConf.ToString(CultureInfo.InvariantCulture)])
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(ct);
         if (result.ExitCode != 0)
@@ -56,7 +69,7 @@ public static class DockerHelper
     public static async Task CancelLndInvoice(string paymentHashHex, CancellationToken ct = default)
     {
         var result = await Cli.Wrap("docker")
-            .WithArguments(["exec", "lnd", "lncli", "--network=regtest", "cancelinvoice", paymentHashHex])
+            .WithArguments(["exec", LndContainer, .. LndCliArgs, "cancelinvoice", paymentHashHex])
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(ct);
         if (result.ExitCode != 0)
@@ -72,7 +85,7 @@ public static class DockerHelper
         string paymentHashHex, CancellationToken ct = default)
     {
         var result = await Cli.Wrap("docker")
-            .WithArguments(["exec", "lnd", "lncli", "--network=regtest", "lookupinvoice", paymentHashHex])
+            .WithArguments(["exec", LndContainer, .. LndCliArgs, "lookupinvoice", paymentHashHex])
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(ct);
         var output = result.StandardOutput;
@@ -94,7 +107,7 @@ public static class DockerHelper
     /// </summary>
     public static async Task<string> PayLndInvoice(string bolt11, CancellationToken ct = default)
     {
-        return await Exec("lnd", ["lncli", "--network=regtest", "payinvoice", "--force", bolt11], ct);
+        return await Exec(LndContainer, [.. LndCliArgs, "payinvoice", "--force", bolt11], ct);
     }
 
     public static async Task<string> CreateLndInvoice(long amtSats = 10000, int expirySecs = 30,
@@ -109,16 +122,13 @@ public static class DockerHelper
     public static async Task<(string Bolt11, string RHashHex)> CreateLndInvoiceWithHash(
         long amtSats = 10000, int expirySecs = 30, CancellationToken ct = default)
     {
-        var args = new List<string>
-        {
-            "lncli", "--network=regtest", "addinvoice", "--amt", amtSats.ToString()
-        };
+        List<string> args = [.. LndCliArgs, "addinvoice", "--amt", amtSats.ToString()];
         if (expirySecs > 0)
         {
             args.AddRange(["--expiry", expirySecs.ToString(CultureInfo.InvariantCulture)]);
         }
 
-        var output = await Exec("lnd", args.ToArray(), ct);
+        var output = await Exec(LndContainer, args.ToArray(), ct);
         var obj = JsonSerializer.Deserialize<JsonObject>(output)
                   ?? throw new InvalidOperationException($"Invoice creation on LND failed. Output: {output}");
         var invoice = obj["payment_request"]?.GetValue<string>()

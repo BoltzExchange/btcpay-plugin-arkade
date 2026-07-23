@@ -47,8 +47,8 @@ public class BoardingLifecycleTests : PlaywrightBaseTest
         // is tracked.
         await SyncWalletAsync(storeId);
 
-        await DockerHelper.Exec("bitcoin",
-            ["bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "sendtoaddress", boardingAddress, "0.001"]);
+        await DockerHelper.Exec(DockerHelper.BitcoinContainer,
+            [.. DockerHelper.BitcoinCliArgs, "sendtoaddress", boardingAddress, "0.001"]);
         await DockerHelper.MineBlocks(1);
 
         // Stage 1 — the confirmed deposit becomes visible as boarding balance. Sync

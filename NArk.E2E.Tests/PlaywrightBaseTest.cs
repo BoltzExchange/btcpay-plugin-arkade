@@ -7,6 +7,7 @@ using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using BTCPayServer.Tests;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CliWrap;
@@ -43,6 +44,28 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
     public string? CreatedUser { get; private set; }
     public string? Password { get; private set; }
     private IServiceProvider? Services { get; set; }
+
+    /// <summary>
+    /// Points the plugin at the BoltzExchange/regtest endpoints through the
+    /// datadir <c>ark.json</c> override (merged over the SDK's Regtest preset
+    /// by <c>ArkPlugin.GetNetworkConfig</c>), so the NNark preset — which
+    /// still describes the ArkLabs stack — stays untouched. Must be written
+    /// after <c>CreateServerTester</c> (its constructor wipes the test
+    /// directory) and before <c>StartAsync</c>.
+    /// </summary>
+    public static void WriteArkNetworkOverride(string testDir)
+    {
+        var datadir = Path.Combine(testDir, "pay");
+        Directory.CreateDirectory(datadir);
+        File.WriteAllText(Path.Combine(datadir, "ark.json"),
+            """
+            {
+                "boltz": "http://localhost:9001/",
+                "esplora": "http://localhost:3002",
+                "electrum-tcp": "tcp://localhost:19001"
+            }
+            """);
+    }
 
     private static bool IsRunningInCI =>
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")) ||
@@ -249,7 +272,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 return _resolvedArkdContainer = candidate;
         }
         throw new InvalidOperationException(
-            "Could not find an arkd container (tried 'arkd' and 'ark'). Is the nigiri stack up?");
+            "Could not find an arkd container (tried 'arkd' and 'ark'). Is the regtest stack up?");
     }
 
     /// <summary>Mints a credit note via the arkd admin CLI.</summary>
@@ -272,7 +295,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         return result.StandardOutput.Trim();
     }
 
-    /// <summary>Initializes and funds the ark CLI for checkout cheat-mode sends.</summary>
+    /// <summary>Initializes and funds the ark CLI for direct out-of-round test payments.</summary>
     protected async Task EnsureArkdCliReadyAsync()
     {
         if (_arkdCliReady) return;
@@ -292,8 +315,8 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 configProbe.StandardError.Contains("not initialized", StringComparison.OrdinalIgnoreCase);
             if (needsInit)
             {
-                var explorerUrl = Environment.GetEnvironmentVariable("ARKADE_CHEAT_ARK_EXPLORER") ??
-                                  "http://mempool_web/api";
+                var explorerUrl = Environment.GetEnvironmentVariable("ARKADE_E2E_ARK_EXPLORER") ??
+                                  "http://electrs-bitcoin:3002";
                 var initResult = await Cli.Wrap("docker")
                     .WithArguments(new[]
                     {
@@ -317,58 +340,7 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 return;
             }
 
-            var receiveResult = await Cli.Wrap("docker")
-                .WithArguments(new[] { "exec", container, "ark", "receive" })
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync();
-            if (!receiveResult.IsSuccess)
-                throw new InvalidOperationException(
-                    $"ark receive failed: {receiveResult.StandardError.Trim()}");
-            using var receiveDoc = JsonDocument.Parse(receiveResult.StandardOutput);
-            var boardingAddr = receiveDoc.RootElement.GetProperty("boarding_address").GetString()
-                ?? throw new InvalidOperationException("ark receive returned no boarding_address");
-
-            var faucetResult = await Cli.Wrap("docker")
-                .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "sendtoaddress", boardingAddr, "1" })
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync();
-            if (!faucetResult.IsSuccess)
-                throw new InvalidOperationException(
-                    $"bitcoin-cli sendtoaddress {boardingAddr} failed: {faucetResult.StandardError.Trim()}");
-
-            var mineResult = await Cli.Wrap("docker")
-                .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "6" })
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync();
-            if (!mineResult.IsSuccess)
-                throw new InvalidOperationException(
-                    $"bitcoin-cli -generate 6 failed: {mineResult.StandardError.Trim()}");
-
-            const int settleAttempts = 5;
-            for (var attempt = 1; attempt <= settleAttempts; attempt++)
-            {
-                var settleResult = await Cli.Wrap("docker")
-                    .WithArguments(new[] { "exec", container, "ark", "settle", "--password", "secret" })
-                    .WithValidation(CommandResultValidation.None)
-                    .ExecuteBufferedAsync();
-                if (settleResult.IsSuccess) break;
-
-                var fundingStillSettling = settleResult.StandardOutput.Contains(
-                    "fees (0) exceed total amount (0)", StringComparison.Ordinal);
-                if (!fundingStillSettling || attempt == settleAttempts)
-                    throw new InvalidOperationException(
-                        $"ark settle failed (exit={settleResult.ExitCode}, attempt={attempt}/{settleAttempts}): " +
-                        $"stderr={settleResult.StandardError.Trim()}, " +
-                        $"stdout={settleResult.StandardOutput.Trim()}");
-
-                // Genuine settling window (one-time suite setup, usually skipped):
-                // arkd has no observable "funding indexed" signal, only the settle retry.
-                await Task.Delay(TimeSpan.FromSeconds(2));
-                await Cli.Wrap("docker")
-                    .WithArguments(new[] { "exec", "bitcoin", "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123", "-generate", "1" })
-                    .WithValidation(CommandResultValidation.None)
-                    .ExecuteBufferedAsync();
-            }
+            await BoardAndSettleArkCliAsync(container);
 
             if (await GetArkdOffchainSatsAsync(container) < 10_000)
                 throw new InvalidOperationException(
@@ -380,6 +352,121 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         finally
         {
             _arkdCliSetupLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Funds the in-container ark CLI wallet: faucets 1 BTC to a boarding
+    /// address, confirms it, and settles it into off-chain balance.
+    /// </summary>
+    private static async Task BoardAndSettleArkCliAsync(string container)
+    {
+        var receiveResult = await Cli.Wrap("docker")
+            .WithArguments(new[] { "exec", container, "ark", "receive" })
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
+        if (!receiveResult.IsSuccess)
+            throw new InvalidOperationException(
+                $"ark receive failed: {receiveResult.StandardError.Trim()}");
+        using var receiveDoc = JsonDocument.Parse(receiveResult.StandardOutput);
+        var boardingAddr = receiveDoc.RootElement.GetProperty("boarding_address").GetString()
+            ?? throw new InvalidOperationException("ark receive returned no boarding_address");
+
+        var faucetResult = await Cli.Wrap("docker")
+            .WithArguments(["exec", DockerHelper.BitcoinContainer, .. DockerHelper.BitcoinCliArgs, "sendtoaddress", boardingAddr, "1"])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
+        if (!faucetResult.IsSuccess)
+            throw new InvalidOperationException(
+                $"bitcoin-cli sendtoaddress {boardingAddr} failed: {faucetResult.StandardError.Trim()}");
+
+        var mineResult = await Cli.Wrap("docker")
+            .WithArguments(["exec", DockerHelper.BitcoinContainer, .. DockerHelper.BitcoinCliArgs, "-generate", "6"])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
+        if (!mineResult.IsSuccess)
+            throw new InvalidOperationException(
+                $"bitcoin-cli -generate 6 failed: {mineResult.StandardError.Trim()}");
+
+        const int settleAttempts = 5;
+        for (var attempt = 1; attempt <= settleAttempts; attempt++)
+        {
+            var settleResult = await Cli.Wrap("docker")
+                .WithArguments(new[] { "exec", container, "ark", "settle", "--password", "secret" })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+            if (settleResult.IsSuccess) break;
+
+            var fundingStillSettling = settleResult.StandardOutput.Contains(
+                "fees (0) exceed total amount (0)", StringComparison.Ordinal);
+            if (!fundingStillSettling || attempt == settleAttempts)
+                throw new InvalidOperationException(
+                    $"ark settle failed (exit={settleResult.ExitCode}, attempt={attempt}/{settleAttempts}): " +
+                    $"stderr={settleResult.StandardError.Trim()}, " +
+                    $"stdout={settleResult.StandardOutput.Trim()}");
+
+            // Genuine settling window (one-time suite setup, usually skipped):
+            // arkd has no observable "funding indexed" signal, only the settle retry.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Cli.Wrap("docker")
+                .WithArguments(["exec", DockerHelper.BitcoinContainer, .. DockerHelper.BitcoinCliArgs, "-generate", "1"])
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+        }
+    }
+
+    /// <summary>
+    /// Pays an ark address out-of-round from the arkd container's CLI wallet,
+    /// re-funding the wallet via boarding + settle when it runs dry.
+    /// </summary>
+    protected static async Task<string?> ArkSendAsync(string destination, long amountSats)
+    {
+        var container = await ResolveArkdContainerAsync();
+        const int sendAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            var result = await Cli.Wrap("docker")
+                .WithArguments(new[]
+                {
+                    "exec", container, "ark", "send",
+                    "--to", destination,
+                    "--amount", amountSats.ToString(CultureInfo.InvariantCulture),
+                    "--password", "secret"
+                })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync();
+            if (result.IsSuccess)
+            {
+                using var doc = JsonDocument.Parse(result.StandardOutput);
+                return doc.RootElement.TryGetProperty("txid", out var txid) ? txid.GetString() : null;
+            }
+
+            var output = result.StandardError + result.StandardOutput;
+            if (attempt >= sendAttempts)
+                throw new InvalidOperationException(
+                    $"ark send failed (exit={result.ExitCode}, attempt={attempt}/{sendAttempts}): " +
+                    $"{result.StandardError.Trim()} {result.StandardOutput.Trim()}");
+
+            if (output.Contains("not enough funds", StringComparison.OrdinalIgnoreCase))
+            {
+                await BoardAndSettleArkCliAsync(container);
+            }
+            else if (output.Contains("VTXO_RECOVERABLE", StringComparison.Ordinal))
+            {
+                var settleResult = await Cli.Wrap("docker")
+                    .WithArguments(new[] { "exec", container, "ark", "settle", "--password", "secret" })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync();
+                if (!settleResult.IsSuccess)
+                    throw new InvalidOperationException(
+                        $"ark settle after VTXO_RECOVERABLE failed: {settleResult.StandardError.Trim()}");
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"ark send failed (exit={result.ExitCode}): " +
+                    $"{result.StandardError.Trim()} {result.StandardOutput.Trim()}");
+            }
         }
     }
 
@@ -505,34 +592,32 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
         });
         Assert.False(string.IsNullOrEmpty(invoice.Id));
 
-        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
-        var token = (await GetAntiforgeryTokenAsync()) ?? "";
-        var payResp = await Page!.Context.APIRequest.PostAsync(
-            new Uri(ServerUri!, $"/i/{invoice.Id}/test-payment").AbsoluteUri,
-            new APIRequestContextOptions
-            {
-                Headers = new Dictionary<string, string>
-                {
-                    ["Content-Type"] = "application/x-www-form-urlencoded",
-                    ["RequestVerificationToken"] = token
-                },
-                Data = $"Amount={amountSats}&CryptoCode=SATS&PaymentMethodId=ARKADE"
-            });
-
-        var payBody = await payResp.TextAsync();
-        Assert.True(payResp.Ok,
-            $"POST /i/{invoice.Id}/test-payment returned {payResp.Status}: {payBody}");
+        var destination = await GetArkadeInvoiceDestinationAsync(client, storeId, invoice.Id);
+        await EnsureArkdCliReadyAsync();
+        await ArkSendAsync(destination, amountSats);
 
         return invoice.Id;
     }
 
+    /// <summary>The ark address of an invoice's ARKADE payment prompt.</summary>
+    protected static async Task<string> GetArkadeInvoiceDestinationAsync(
+        BTCPayServerClient client,
+        string storeId,
+        string invoiceId)
+    {
+        var methods = await client.GetInvoicePaymentMethods(storeId, invoiceId);
+        var arkade = methods.FirstOrDefault(m => m.PaymentMethodId == "ARKADE")
+            ?? throw new InvalidOperationException(
+                $"invoice {invoiceId} has no ARKADE payment method " +
+                $"(got: {string.Join(", ", methods.Select(m => m.PaymentMethodId))})");
+        if (string.IsNullOrEmpty(arkade.Destination))
+            throw new InvalidOperationException($"invoice {invoiceId} ARKADE prompt has no destination");
+        return arkade.Destination;
+    }
+
     protected static async Task<string> GetNewRegtestBitcoinAddressAsync()
     {
-        var address = (await DockerHelper.Exec("bitcoin",
-            [
-                "bitcoin-cli", "-regtest", "-rpcuser=admin1", "-rpcpassword=123",
-                "getnewaddress"
-            ])).Trim();
+        var address = (await DockerHelper.Exec(DockerHelper.BitcoinContainer, [.. DockerHelper.BitcoinCliArgs, "getnewaddress"])).Trim();
         if (string.IsNullOrWhiteSpace(address))
             throw new InvalidOperationException("bitcoin-cli getnewaddress returned empty output.");
         return address;
