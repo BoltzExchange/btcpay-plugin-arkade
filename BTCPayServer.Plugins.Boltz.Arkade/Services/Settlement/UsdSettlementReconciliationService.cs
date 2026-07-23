@@ -46,9 +46,9 @@ public sealed class UsdSettlementReconciliationService(
         }
     }
 
-    // Terminal rows need no reconciliation; everything else is either an
-    // in-flight swap to mirror or crash debris for the stale handling below.
-    internal static readonly Expression<Func<UsdSettlementTransferEntity, bool>> ReconciliationScope =
+    // Every non-terminal row both needs reconciliation and reserves its wallet
+    // against another automatic settlement attempt.
+    internal static readonly Expression<Func<UsdSettlementTransferEntity, bool>> BlockingScope =
         transfer =>
             transfer.State != UsdSettlementState.Completed &&
             transfer.State != UsdSettlementState.Refunded &&
@@ -69,7 +69,7 @@ public sealed class UsdSettlementReconciliationService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var transfers = await db.UsdSettlementTransfers
-            .Where(ReconciliationScope)
+            .Where(BlockingScope)
             .ToArrayAsync(cancellationToken);
 
         foreach (var walletTransfers in transfers.GroupBy(transfer => transfer.WalletId))

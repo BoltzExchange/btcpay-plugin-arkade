@@ -3,6 +3,7 @@ using System.Text.Json;
 using BTCPayServer.Client;
 using BTCPayServer.Plugins.Boltz.Arkade.Data;
 using BTCPayServer.Plugins.Boltz.Arkade.Helpers;
+using BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -498,11 +499,9 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
     }
 
     private static Task<bool> HasBlockingTransferAsync(ArkPluginDbContext db, string walletId) =>
-        db.UsdSettlementTransfers.AnyAsync(transfer =>
-            transfer.WalletId == walletId &&
-            transfer.State != UsdSettlementState.Completed &&
-            transfer.State != UsdSettlementState.Refunded &&
-            transfer.State != UsdSettlementState.Cancelled);
+        db.UsdSettlementTransfers
+            .Where(UsdSettlementReconciliationService.BlockingScope)
+            .AnyAsync(transfer => transfer.WalletId == walletId);
 
     private static UsdSettlementTransferEntity SeedDisplayTransfer(
         string id,

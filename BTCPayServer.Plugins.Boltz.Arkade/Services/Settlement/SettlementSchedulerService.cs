@@ -239,17 +239,9 @@ public class SettlementSchedulerService(
         CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await db.UsdSettlementTransfers.AnyAsync(
-            transfer =>
-                transfer.WalletId == walletId &&
-                (transfer.State == UsdSettlementState.PreFunding ||
-                 transfer.State == UsdSettlementState.FundingStarted ||
-                 transfer.State == UsdSettlementState.ArkLegFunded ||
-                 transfer.State == UsdSettlementState.TbtcLocked ||
-                 transfer.State == UsdSettlementState.StableClaiming ||
-                 transfer.State == UsdSettlementState.BridgeSettling ||
-                 transfer.State == UsdSettlementState.ManualReview),
-            cancellationToken);
+        return await db.UsdSettlementTransfers
+            .Where(UsdSettlementReconciliationService.BlockingScope)
+            .AnyAsync(transfer => transfer.WalletId == walletId, cancellationToken);
     }
 
     private async Task SettleUsd(

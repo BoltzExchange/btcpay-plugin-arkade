@@ -339,7 +339,7 @@ public class UsdSettlementReconciliationStateTests
     [InlineData(UsdSettlementState.Completed, false)]
     [InlineData(UsdSettlementState.Refunded, false)]
     [InlineData(UsdSettlementState.Cancelled, false)]
-    public void ReconciliationScope_TracksEveryNonTerminalRow(
+    public void BlockingScope_TracksEveryNonTerminalRow(
         UsdSettlementState state, bool expected)
     {
         // Terminal rows — Cancelled included — are invisible to reconciliation,
@@ -347,7 +347,7 @@ public class UsdSettlementReconciliationStateTests
         // again: correctness depends on the cancel guard above.
         Assert.Equal(
             expected,
-            UsdSettlementReconciliationService.ReconciliationScope.Compile()(Transfer(state)));
+            UsdSettlementReconciliationService.BlockingScope.Compile()(Transfer(state)));
     }
 
     public static TheoryData<BindingSwapStatus> AcceptableDegradedStatuses => new()
