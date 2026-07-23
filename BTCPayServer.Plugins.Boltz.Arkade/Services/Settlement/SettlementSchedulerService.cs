@@ -262,8 +262,7 @@ public class SettlementSchedulerService(
                         usd.DestinationChain,
                         usd.Asset,
                         usd.DestinationAddress),
-                    trigger.Store.Id,
-                    MaxSlippageBps: checked((uint)usd.SlippageBps)),
+                    trigger.Store.Id),
                 cancellationToken);
 
             logger.LogInformation(

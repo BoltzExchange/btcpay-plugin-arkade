@@ -14,8 +14,7 @@ public record SettlementTransferRequest(
     string WalletId,
     long AmountSats,
     SettlementDestination Destination,
-    string? StoreId = null,
-    uint? MaxSlippageBps = null);
+    string? StoreId = null);
 
 public record SettlementDestination(
     string Network,

@@ -101,8 +101,7 @@ public class ArkadePaymentMethodConfigTests
                     50_000,
                     UsdSettlementData.DefaultDestinationChain,
                     "0xabc",
-                    UsdSettlementData.DefaultAsset,
-                    UsdSettlementData.DefaultSlippageBps))
+                    UsdSettlementData.DefaultAsset))
             .SetActiveSettlement(StoreSettlementOption.BitcoinMainchain);
 
         // Switching to mainchain keeps the stablecoin destination stored so the
@@ -140,8 +139,7 @@ public class ArkadePaymentMethodConfigTests
                 50_000,
                 UsdSettlementData.DefaultDestinationChain,
                 "0x1234567890abcdef1234567890abcdef12345678",
-                UsdSettlementData.UsdcAsset,
-                125));
+                UsdSettlementData.UsdcAsset));
         var serializer = BlobSerializer.CreateSerializer().Serializer;
 
         var json = JObject.FromObject(config, serializer);
@@ -156,10 +154,9 @@ public class ArkadePaymentMethodConfigTests
         Assert.Equal(UsdSettlementData.DefaultDestinationChain, storedUsd.GetAdditionalData(UsdSettlementData.DestinationChainKey));
         Assert.Equal("0x1234567890abcdef1234567890abcdef12345678", storedUsd.GetAdditionalData(UsdSettlementData.DestinationAddressKey));
         Assert.Equal(UsdSettlementData.UsdcAsset, storedUsd.GetAdditionalData(UsdSettlementData.AssetKey));
-        Assert.Equal("125", storedUsd.GetAdditionalData(UsdSettlementData.SlippageBpsKey));
+        Assert.Null(storedUsd.GetAdditionalData("slippageBps"));
         Assert.NotNull(parsed);
         Assert.Equal(50_000, parsed.ThresholdSats);
-        Assert.Equal(125, parsed.SlippageBps);
         Assert.Contains(
             roundTripped.SettlementOptions!,
             option => option.Type == StoreSettlementOptionKeys.BitcoinMainchain);
@@ -179,8 +176,7 @@ public class ArkadePaymentMethodConfigTests
                 [UsdSettlementData.ThresholdKey] = "50000",
                 [UsdSettlementData.DestinationChainKey] = "  Arbitrum One  ",
                 [UsdSettlementData.DestinationAddressKey] = "  0x1234  ",
-                [UsdSettlementData.AssetKey] = inputAsset,
-                [UsdSettlementData.SlippageBpsKey] = "100"
+                [UsdSettlementData.AssetKey] = inputAsset
             }
         });
 
@@ -189,6 +185,26 @@ public class ArkadePaymentMethodConfigTests
         Assert.Equal(UsdSettlementData.DefaultDestinationChain, result.Config.DestinationChain);
         Assert.Equal("0x1234", result.Config.DestinationAddress);
         Assert.Equal(expectedAsset, result.Config.Asset);
+    }
+
+    [Fact]
+    public void UsdSettlementConfiguration_IgnoresAndDropsLegacySlippage()
+    {
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = "50000",
+                [UsdSettlementData.DestinationChainKey] = UsdSettlementData.DefaultDestinationChain,
+                [UsdSettlementData.DestinationAddressKey] = "0x1234",
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset,
+                ["slippageBps"] = "500"
+            }
+        });
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Null(UsdSettlementConfiguration.ToData(result.Config).Value<string>("slippageBps"));
     }
 
     [Theory]
@@ -223,9 +239,7 @@ public class ArkadePaymentMethodConfigTests
         Assert.Equal(
             UsdSettlementData.DefaultAsset,
             data.Value<string>(UsdSettlementData.AssetKey));
-        Assert.Equal(
-            UsdSettlementData.DefaultSlippageBps.ToString(),
-            data.Value<string>(UsdSettlementData.SlippageBpsKey));
+        Assert.Null(data.Value<string>("slippageBps"));
     }
 
     [Theory]
@@ -234,9 +248,6 @@ public class ArkadePaymentMethodConfigTests
     [InlineData("destinationChain", null, "destinationChain")]
     [InlineData("destinationAddress", "   ", "destinationAddress")]
     [InlineData("asset", "DAI", "asset")]
-    [InlineData("slippageBps", "9", "slippageBps")]
-    [InlineData("slippageBps", "501", "slippageBps")]
-    [InlineData("slippageBps", "1.5", "slippageBps")]
     public void UsdSettlementConfiguration_RejectsInvalidEnabledConfig(
         string field,
         string? value,
@@ -247,8 +258,7 @@ public class ArkadePaymentMethodConfigTests
             [UsdSettlementData.ThresholdKey] = "50000",
             [UsdSettlementData.DestinationChainKey] = UsdSettlementData.DefaultDestinationChain,
             [UsdSettlementData.DestinationAddressKey] = "0x1234",
-            [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset,
-            [UsdSettlementData.SlippageBpsKey] = "100"
+            [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
         };
         data[field] = value is null ? JValue.CreateNull() : value;
 
@@ -269,8 +279,7 @@ public class ArkadePaymentMethodConfigTests
             Data = new JObject
             {
                 [UsdSettlementData.ThresholdKey] = threshold is null ? JValue.CreateNull() : threshold,
-                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset,
-                [UsdSettlementData.SlippageBpsKey] = "100"
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
             }
         });
 
@@ -291,8 +300,7 @@ public class ArkadePaymentMethodConfigTests
                 [UsdSettlementData.ThresholdKey] = threshold is null ? JValue.CreateNull() : threshold,
                 [UsdSettlementData.DestinationChainKey] = UsdSettlementData.DefaultDestinationChain,
                 [UsdSettlementData.DestinationAddressKey] = "0x1234",
-                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset,
-                [UsdSettlementData.SlippageBpsKey] = "100"
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
             }
         });
 

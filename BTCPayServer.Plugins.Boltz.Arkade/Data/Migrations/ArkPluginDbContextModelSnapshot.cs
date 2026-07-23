@@ -117,9 +117,6 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Data.Migrations
                     b.Property<string>("RustSwapId")
                         .HasColumnType("text");
 
-                    b.Property<int>("SlippageBps")
-                        .HasColumnType("integer");
-
                     b.Property<long>("SourceAmountSats")
                         .HasColumnType("bigint");
 

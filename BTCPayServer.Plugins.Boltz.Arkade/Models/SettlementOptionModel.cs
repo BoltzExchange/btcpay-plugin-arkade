@@ -52,15 +52,11 @@ public static class UsdSettlementData
     public const string DestinationChainKey = "destinationChain";
     public const string DestinationAddressKey = "destinationAddress";
     public const string AssetKey = "asset";
-    public const string SlippageBpsKey = "slippageBps";
 
     public const string UsdtAsset = "USDT";
     public const string UsdcAsset = "USDC";
     public const string DefaultAsset = UsdtAsset;
     public const string DefaultDestinationChain = "Arbitrum One";
-    public const int DefaultSlippageBps = 100;
-    public const int MinSlippageBps = 10;
-    public const int MaxSlippageBps = 500;
 
     public static readonly IReadOnlyList<string> Assets =
         [UsdtAsset, UsdcAsset];

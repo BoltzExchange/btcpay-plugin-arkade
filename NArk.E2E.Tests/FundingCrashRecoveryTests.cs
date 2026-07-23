@@ -30,7 +30,6 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
 {
     private const string DestinationAddress = "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720";
     private const long SourceAmountSats = 40_000;
-    private const int SlippageBps = 100;
     private const string SchedulerTypeName =
         "BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement.SettlementSchedulerService";
     private const string StablecoinClientTypeName =
@@ -337,11 +336,8 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
         var bindingAsset = GetProperty<object>(destination, "Asset");
 
         var prepareMethod = FindMethod(nativeClient, "PrepareFromSats", 5);
-        var nullableSlippage = Activator.CreateInstance(
-            prepareMethod.GetParameters()[4].ParameterType,
-            checked((uint)SlippageBps));
         var prepared = await AwaitTaskResultAsync(prepareMethod.Invoke(nativeClient,
-            [DestinationAddress, "Arbitrum One", bindingAsset, checked((ulong)invoiceAmountSats), nullableSlippage]))
+            [DestinationAddress, "Arbitrum One", bindingAsset, checked((ulong)invoiceAmountSats), null]))
             ?? throw new InvalidOperationException("PrepareFromSats returned null");
         var created = await InvokeTaskResultAsync(nativeClient, "CreateReverseSwap", prepared)
             ?? throw new InvalidOperationException("CreateReverseSwap returned null");
@@ -366,7 +362,6 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
             SourceAmountSats = SourceAmountSats,
             InvoiceAmountSats = checked((long)GetProperty<ulong>(prepared, "InvoiceAmountSats")),
             ExpectedOutputAtomic = checked((long)GetProperty<ulong>(prepared, "OutputAmount")),
-            SlippageBps = SlippageBps,
             RustSwapId = rustSwapId,
             Invoice = invoice,
             PaymentHash = parsedInvoice.Hash.ToString(),
@@ -493,7 +488,6 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
                 destinationChain = "arbitrum",
                 destinationAddress = DestinationAddress,
                 asset = "USDT",
-                slippageBps = SlippageBps,
             });
         Assert.True(response.Ok, $"enabling stablecoin settlement failed: {await response.TextAsync()}");
     }
@@ -522,7 +516,6 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
             SourceAmountSats = SourceAmountSats,
             InvoiceAmountSats = SourceAmountSats - 1_000,
             ExpectedOutputAtomic = 40_000_000,
-            SlippageBps = SlippageBps,
             Error = error,
             CreatedAt = updatedAt,
             UpdatedAt = updatedAt

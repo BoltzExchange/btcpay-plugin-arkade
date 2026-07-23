@@ -1089,8 +1089,7 @@ public class ArkGreenfieldController(
                 [UsdSettlementData.ThresholdKey] = request.ThresholdSats,
                 [UsdSettlementData.DestinationChainKey] = ParseStablecoinChain(request.DestinationChain),
                 [UsdSettlementData.DestinationAddressKey] = request.DestinationAddress,
-                [UsdSettlementData.AssetKey] = request.Asset,
-                [UsdSettlementData.SlippageBpsKey] = request.SlippageBps
+                [UsdSettlementData.AssetKey] = request.Asset
             }
         };
         var validationError = await stablecoinSettlementOption.ValidateInput(
@@ -1277,8 +1276,7 @@ public class ArkGreenfieldController(
                 ThresholdSats = config.ThresholdSats,
                 DestinationChain = MapStablecoinChain(config.DestinationChain),
                 DestinationAddress = config.DestinationAddress,
-                Asset = config.Asset,
-                SlippageBps = config.SlippageBps
+                Asset = config.Asset
             };
 
     #endregion

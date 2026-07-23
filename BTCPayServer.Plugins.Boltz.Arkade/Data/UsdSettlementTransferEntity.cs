@@ -54,7 +54,6 @@ public class UsdSettlementTransferEntity
     public long InvoiceAmountSats { get; set; }
     public long ExpectedOutputAtomic { get; set; }
     public long? DeliveredOutputAtomic { get; set; }
-    public int SlippageBps { get; set; }
 
     public string? RustSwapId { get; set; }
     public string? Invoice { get; set; }

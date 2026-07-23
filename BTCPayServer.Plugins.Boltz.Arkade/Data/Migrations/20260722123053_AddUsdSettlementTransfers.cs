@@ -56,7 +56,6 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Data.Migrations
                     InvoiceAmountSats = table.Column<long>(type: "bigint", nullable: false),
                     ExpectedOutputAtomic = table.Column<long>(type: "bigint", nullable: false),
                     DeliveredOutputAtomic = table.Column<long>(type: "bigint", nullable: true),
-                    SlippageBps = table.Column<int>(type: "integer", nullable: false),
                     RustSwapId = table.Column<string>(type: "text", nullable: true),
                     Invoice = table.Column<string>(type: "text", nullable: true),
                     PaymentHash = table.Column<string>(type: "text", nullable: true),

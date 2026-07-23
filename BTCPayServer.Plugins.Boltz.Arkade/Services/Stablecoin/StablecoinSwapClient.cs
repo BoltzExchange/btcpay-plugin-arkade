@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Boltz.Client;
 using BTCPayServer.Plugins.Boltz.Arkade.Data;
-using BTCPayServer.Plugins.Boltz.Arkade.Models;
 using BTCPayServer.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -23,6 +22,12 @@ namespace BTCPayServer.Plugins.Boltz.Arkade.Services.Stablecoin;
 /// </summary>
 public sealed class StablecoinSwapClient : IStablecoinSwapClient, IHostedService, IDisposable
 {
+    // Automatic settlement executes at the current market rate. Rust still
+    // needs a narrow tolerance for the on-chain minOut between its live quote
+    // and transaction inclusion; this is an execution detail, not a merchant
+    // quote preference.
+    private const uint ExecutionSlippageBps = 100;
+
     private const string MainnetOnlyReason = "Stablecoin settlement is mainnet-only.";
     private const string LinuxOnlyReason = "Stablecoin settlement is available only on Linux.";
     private const string SwapProviderRequiredReason = "Stablecoin settlement requires an Ark swap provider endpoint.";
@@ -152,7 +157,7 @@ public sealed class StablecoinSwapClient : IStablecoinSwapClient, IHostedService
             var config = new ClientConfig(
                 Seed: seed,
                 ReferralId: "btcpay-arkade",
-                SlippageBps: checked((uint)UsdSettlementData.DefaultSlippageBps),
+                SlippageBps: ExecutionSlippageBps,
                 // Apply overrides all-or-nothing: a partial configuration must
                 // not silently rewire individual endpoints on mainnet.
                 ApiUrl: _endpointOverrides.Active ? _endpointOverrides.ApiUrl : null,

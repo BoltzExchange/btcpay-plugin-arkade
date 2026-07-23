@@ -8,12 +8,10 @@
     var chainField = SettlementInputName.Field(optionType, UsdSettlementData.DestinationChainKey);
     var addressField = SettlementInputName.Field(optionType, UsdSettlementData.DestinationAddressKey);
     var assetField = SettlementInputName.Field(optionType, UsdSettlementData.AssetKey);
-    var slippageField = SettlementInputName.Field(optionType, UsdSettlementData.SlippageBpsKey);
     var thresholdValue = Model.Data.Value<string>(UsdSettlementData.ThresholdKey);
     var chainValue = Model.Data.Value<string>(UsdSettlementData.DestinationChainKey);
     var addressValue = Model.Data.Value<string>(UsdSettlementData.DestinationAddressKey);
     var assetValue = Model.Data.Value<string>(UsdSettlementData.AssetKey);
-    var slippageValue = Model.Data.Value<string>(UsdSettlementData.SlippageBpsKey);
 }
 
 <div class="row g-3 mt-1" data-stablecoin-wallet>
@@ -64,7 +62,7 @@
         </select>
         @Html.ValidationMessage(assetField, null, new { @class = "text-danger" })
     </div>
-    <div class="col-md-6">
+    <div class="col-12">
         <label for="@(Model.InputPrefix + UsdSettlementData.ThresholdKey)" class="form-label">Settlement threshold</label>
         <div class="input-group">
             <input id="@(Model.InputPrefix + UsdSettlementData.ThresholdKey)"
@@ -80,21 +78,6 @@
             <span class="input-group-text">sats</span>
         </div>
         @Html.ValidationMessage(thresholdField, null, new { @class = "text-danger" })
-    </div>
-    <div class="col-md-6">
-        <label for="@(Model.InputPrefix + UsdSettlementData.SlippageBpsKey)" class="form-label">Maximum slippage</label>
-        <div class="input-group">
-            <input id="@(Model.InputPrefix + UsdSettlementData.SlippageBpsKey)"
-                   name="@slippageField"
-                   value="@slippageValue"
-                   class="form-control"
-                   type="number"
-                   min="@UsdSettlementData.MinSlippageBps"
-                   max="@UsdSettlementData.MaxSlippageBps"
-                   step="1" />
-            <span class="input-group-text">bps</span>
-        </div>
-        @Html.ValidationMessage(slippageField, null, new { @class = "text-danger" })
     </div>
 </div>
 <div class="form-text mt-2">

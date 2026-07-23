@@ -79,7 +79,6 @@ public class CompositeUsdSettlementService(
             DestinationAsset = UsdSettlementConfiguration.CanonicalizeAsset(request.Destination.Asset),
             DestinationAddress = request.Destination.Address,
             SourceAmountSats = request.AmountSats,
-            SlippageBps = checked((int)(request.MaxSlippageBps ?? UsdSettlementData.DefaultSlippageBps)),
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
@@ -178,7 +177,7 @@ public class CompositeUsdSettlementService(
             request.Destination.Network,
             bindingAsset,
             checked((ulong)nativeInvoiceAmount),
-            request.MaxSlippageBps);
+            null);
         transfer.InvoiceAmountSats = checked((long)prepared.InvoiceAmountSats);
         transfer.ExpectedOutputAtomic = checked((long)prepared.OutputAmount);
         transfer.StableLegFeeSats = checked((long)prepared.BoltzFeeSats);
@@ -232,10 +231,6 @@ public class CompositeUsdSettlementService(
         if (string.IsNullOrWhiteSpace(request.Destination.Network) ||
             string.IsNullOrWhiteSpace(request.Destination.Address))
             throw new ArgumentException("Stablecoin destination chain and address are required.", nameof(request));
-        if (request.MaxSlippageBps is < UsdSettlementData.MinSlippageBps or > UsdSettlementData.MaxSlippageBps)
-            throw new ArgumentOutOfRangeException(
-                nameof(request.MaxSlippageBps),
-                $"Slippage must be between {UsdSettlementData.MinSlippageBps} and {UsdSettlementData.MaxSlippageBps} basis points.");
     }
 
     private async Task InsertTransfer(

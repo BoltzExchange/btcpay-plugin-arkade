@@ -89,6 +89,7 @@ public class StablecoinSettlementTests : PlaywrightBaseTest
         Assert.Equal("Arbitrum One", await Page.InputValueAsync(DestinationChainSelect));
         Assert.Equal("USDT", await Page.InputValueAsync(AssetSelect));
         Assert.Equal("30000", await Page.InputValueAsync(ThresholdInput));
+        Assert.Equal(0, await Page.GetByLabel("Maximum slippage").CountAsync());
 
         var configured = await SendGreenfieldAsync(
             "GET", $"/api/v1/stores/{storeId}/arkade/stablecoin/settlement");
@@ -98,6 +99,7 @@ public class StablecoinSettlementTests : PlaywrightBaseTest
             Assert.True(configuredDocument.RootElement.GetProperty("enabled").GetBoolean());
             Assert.True(configuredDocument.RootElement.GetProperty("available").GetBoolean());
             Assert.Equal("arbitrum", configuredDocument.RootElement.GetProperty("destinationChain").GetString());
+            Assert.False(configuredDocument.RootElement.TryGetProperty("slippageBps", out _));
         }
 
         var disabled = await SendGreenfieldAsync(
@@ -313,7 +315,6 @@ public class StablecoinSettlementTests : PlaywrightBaseTest
             SourceAmountSats = 40_000,
             InvoiceAmountSats = 39_000,
             ExpectedOutputAtomic = 40_000_000,
-            SlippageBps = 100,
             Error = error,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -362,7 +363,6 @@ public class StablecoinSettlementTests : PlaywrightBaseTest
                 },
                 destinationAddress = DestinationAddress,
                 asset,
-                slippageBps = 100,
             });
         Assert.True(configResponse.Ok, $"enabling stablecoin settlement failed: {await configResponse.TextAsync()}");
 

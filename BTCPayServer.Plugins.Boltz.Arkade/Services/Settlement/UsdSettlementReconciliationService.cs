@@ -232,14 +232,10 @@ public sealed class UsdSettlementReconciliationService(
     }
 
     /// <summary>
-    /// Consumes a drained QuoteDegraded event by accepting the degraded quote.
-    /// The merchant never locked an exchange rate — the threshold triggers a
-    /// market-rate sweep — so a degraded quote is just the current market and
-    /// the settlement proceeds at it; the slippage bounds remain enforced
-    /// inside the claim itself. Acceptance is legal only while the durable
-    /// swap lookup shows TbtcLocked/Claiming; the resulting state is picked up
-    /// by the normal Advance path on the next tick (a failed forced claim
-    /// leaves the swap Claiming for the manager's automatic retry).
+    /// Automatic settlement is a market-rate sweep: the merchant approved the
+    /// threshold and destination, not the transient prepare-time quote. Accept
+    /// a newer live quote and let Rust retain its fixed on-chain minOut guard
+    /// between that quote and transaction inclusion.
     /// </summary>
     internal static async Task<bool> HandleQuoteDegraded(
         UsdSettlementTransferEntity transfer,
@@ -252,7 +248,7 @@ public sealed class UsdSettlementReconciliationService(
             return false;
 
         logger.LogWarning(
-            "Stablecoin settlement {TransferId}: accepting degraded quote for swap {SwapId} — expected {ExpectedUsd} USD atomic units, quoted {QuotedUsd}",
+            "Stablecoin settlement {TransferId}: accepting current market quote for swap {SwapId} — prepared {ExpectedUsd} USD atomic units, now quoted {QuotedUsd}",
             transfer.Id,
             swap.Id,
             quoteDegraded.ExpectedUsd,
@@ -263,11 +259,10 @@ public sealed class UsdSettlementReconciliationService(
         }
         catch (BindingException.Operation ex) when (ex.code == "generic")
         {
-            // The swap left the acceptable window between the durable lookup
-            // and this call — it already progressed, so there is nothing left
-            // to accept and the next tick reads whatever it became.
+            // The swap progressed after the durable lookup but before this
+            // call. Its current state is picked up on the next pass.
             logger.LogInformation(
-                "Stablecoin settlement {TransferId}: swap {SwapId} progressed past its degraded quote before acceptance: {Message}",
+                "Stablecoin settlement {TransferId}: swap {SwapId} progressed before the current quote was accepted: {Message}",
                 transfer.Id,
                 swap.Id,
                 ex.message);

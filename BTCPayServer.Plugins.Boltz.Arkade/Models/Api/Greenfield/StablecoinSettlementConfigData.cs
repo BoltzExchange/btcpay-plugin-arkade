@@ -1,5 +1,3 @@
-using BTCPayServer.Plugins.Boltz.Arkade.Models;
-
 namespace BTCPayServer.Plugins.Boltz.Arkade.Models.Api.Greenfield;
 
 /// <summary>
@@ -16,5 +14,4 @@ public class StablecoinSettlementConfigData
     public string? DestinationChain { get; set; }
     public string? DestinationAddress { get; set; }
     public string? Asset { get; set; }
-    public int SlippageBps { get; set; } = UsdSettlementData.DefaultSlippageBps;
 }

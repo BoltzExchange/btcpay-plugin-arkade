@@ -359,7 +359,7 @@ public class UsdSettlementReconciliationStateTests
 
     [Theory]
     [MemberData(nameof(AcceptableDegradedStatuses))]
-    public async Task DegradedQuote_IsAcceptedInsteadOfParkingTheTransfer(BindingSwapStatus status)
+    public async Task DegradedQuote_IsAcceptedAtTheCurrentMarketRate(BindingSwapStatus status)
     {
         // The merchant never locked an exchange rate — the threshold triggers
         // a market-rate sweep — so a degraded quote is just the current market:
@@ -377,7 +377,7 @@ public class UsdSettlementReconciliationStateTests
             NullLogger.Instance);
 
         Assert.False(changed);
-        Assert.Equal(new[] { "native-1" }, client.AcceptedSwapIds);
+        Assert.Equal(["native-1"], client.AcceptedSwapIds);
         Assert.Equal(UsdSettlementState.TbtcLocked, transfer.State);
         Assert.Null(transfer.Error);
     }
@@ -386,7 +386,7 @@ public class UsdSettlementReconciliationStateTests
     public async Task DegradedQuote_OnProgressedSwap_IsNotAccepted()
     {
         // A terminal or already-claiming-complete durable lookup is newer
-        // authority than a queued degradation event: nothing to accept.
+        // authority than a queued degradation event.
         var transfer = MatchedTransfer(UsdSettlementState.BridgeSettling);
         var swap = NativeSwap(new BindingSwapStatus.Settling());
         var client = new AcceptRecordingClient();
@@ -404,16 +404,15 @@ public class UsdSettlementReconciliationStateTests
     }
 
     [Fact]
-    public async Task DegradedQuote_ToleratesTheAlreadyProgressedRejection()
+    public async Task DegradedQuote_ToleratesAConcurrentStateAdvance()
     {
-        // "generic" is the binding's not-in-TbtcLocked/Claiming rejection: the
-        // swap moved on between the durable lookup and the call. Logged, not
-        // thrown — the next tick reads whatever the swap became.
         var transfer = MatchedTransfer(UsdSettlementState.TbtcLocked);
         var swap = NativeSwap(new BindingSwapStatus.TbtcLocked());
         var client = new AcceptRecordingClient
         {
-            AcceptError = new BindingException.Operation("generic", "swap is not awaiting a quote decision")
+            AcceptError = new BindingException.Operation(
+                "generic",
+                "swap is not awaiting a quote decision")
         };
 
         var changed = await UsdSettlementReconciliationService.HandleQuoteDegraded(
@@ -424,7 +423,7 @@ public class UsdSettlementReconciliationStateTests
             NullLogger.Instance);
 
         Assert.False(changed);
-        Assert.Equal(new[] { "native-1" }, client.AcceptedSwapIds);
+        Assert.Equal(["native-1"], client.AcceptedSwapIds);
         Assert.Equal(UsdSettlementState.TbtcLocked, transfer.State);
         Assert.Null(transfer.Error);
     }
@@ -459,15 +458,9 @@ public class UsdSettlementReconciliationStateTests
         var transfer = Transfer(state);
         transfer.RustSwapId = "native-1";
         transfer.Invoice = "lnbc1invoice";
-        transfer.SlippageBps = 100;
         return transfer;
     }
 
-    /// <summary>
-    /// Minimal IBoltzClient seam for the degraded-quote handler: records
-    /// AcceptDegradedQuote calls; every other member is unreachable from the
-    /// handler under test.
-    /// </summary>
     private sealed class AcceptRecordingClient : IBoltzClient
     {
         public List<string> AcceptedSwapIds { get; } = [];

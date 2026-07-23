@@ -10,8 +10,7 @@ public sealed record UsdSettlementConfig(
     long ThresholdSats,
     string DestinationChain,
     string DestinationAddress,
-    string Asset,
-    int SlippageBps);
+    string Asset);
 
 public sealed record UsdSettlementConfigResult(
     UsdSettlementConfig? Config,
@@ -41,10 +40,6 @@ public static class UsdSettlementConfiguration
         {
             var inputData = (JObject)input.Data.DeepClone();
             SetDefault(inputData, UsdSettlementData.AssetKey, UsdSettlementData.DefaultAsset);
-            SetDefault(
-                inputData,
-                UsdSettlementData.SlippageBpsKey,
-                UsdSettlementData.DefaultSlippageBps.ToString(CultureInfo.InvariantCulture));
             if (TryCanonicalizeAsset(
                     inputData.Value<string>(UsdSettlementData.AssetKey),
                     out var canonicalAsset))
@@ -58,9 +53,7 @@ public static class UsdSettlementConfiguration
             ? ToData(configured)
             : new JObject
             {
-                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset,
-                [UsdSettlementData.SlippageBpsKey] =
-                    UsdSettlementData.DefaultSlippageBps.ToString(CultureInfo.InvariantCulture)
+                [UsdSettlementData.AssetKey] = UsdSettlementData.DefaultAsset
             };
     }
 
@@ -120,32 +113,12 @@ public static class UsdSettlementConfiguration
                 $"Settlement asset must be one of {string.Join(", ", UsdSettlementData.Assets)}.");
         }
 
-        var slippageValue = Read(input, UsdSettlementData.SlippageBpsKey);
-        if (!int.TryParse(
-                slippageValue,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var slippageBps))
-        {
-            return Invalid(
-                UsdSettlementData.SlippageBpsKey,
-                "Stablecoin slippage must be a whole number of basis points.");
-        }
-
-        if (slippageBps is < UsdSettlementData.MinSlippageBps or > UsdSettlementData.MaxSlippageBps)
-        {
-            return Invalid(
-                UsdSettlementData.SlippageBpsKey,
-                $"Stablecoin slippage must be between {UsdSettlementData.MinSlippageBps} and {UsdSettlementData.MaxSlippageBps} basis points.");
-        }
-
         return new UsdSettlementConfigResult(
             new UsdSettlementConfig(
                 thresholdSats,
                 destinationChain.Trim(),
                 destinationAddress.Trim(),
-                canonicalAsset,
-                slippageBps));
+                canonicalAsset));
     }
 
     public static ArkadePaymentMethodConfig Set(
@@ -162,9 +135,7 @@ public static class UsdSettlementConfiguration
                 config.ThresholdSats.ToString(CultureInfo.InvariantCulture),
             [UsdSettlementData.DestinationChainKey] = config.DestinationChain,
             [UsdSettlementData.DestinationAddressKey] = config.DestinationAddress,
-            [UsdSettlementData.AssetKey] = CanonicalizeAsset(config.Asset),
-            [UsdSettlementData.SlippageBpsKey] =
-                config.SlippageBps.ToString(CultureInfo.InvariantCulture)
+            [UsdSettlementData.AssetKey] = CanonicalizeAsset(config.Asset)
         };
 
     public static BindingAsset? ResolveBindingAsset(
