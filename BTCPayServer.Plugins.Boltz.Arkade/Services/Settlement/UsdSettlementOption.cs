@@ -60,10 +60,12 @@ public sealed class UsdSettlementOption(
                 UsdSettlementData.ThresholdKey,
                 "Enter the required details to enable stablecoin settlement.");
 
-        // Initial setup parses before its wallet is persisted. The controller revalidates after
-        // wallet creation; subsequent settings saves arrive here with the existing wallet ID.
         if (string.IsNullOrWhiteSpace(walletId))
-            return null;
+        {
+            return ValidationError(
+                UsdSettlementData.DestinationAddressKey,
+                "An Arkade wallet is required to validate the stablecoin destination.");
+        }
 
         try
         {

@@ -160,27 +160,6 @@ public class ArkController(
             return View(model);
         }
 
-        // Only the chosen settlement method is validated and applied; the
-        // methods are mutually exclusive.
-        var chosenSettlement = selectedSettlement is { } selectedOption
-            ? settlementOptions.FirstOrDefault(option => option.Type == selectedOption)
-            : null;
-        if (chosenSettlement is not null)
-        {
-            // Fail fast before creating the wallet. The wallet does not exist yet,
-            // so wallet-scoped checks are deferred (walletId null) to the apply pass.
-            var validationResult = await chosenSettlement.ValidateInput(
-                store,
-                walletId: null,
-                model.SettlementInputs.GetValueOrDefault(chosenSettlement.Type),
-                HttpContext.RequestAborted);
-            if (validationResult is not null)
-            {
-                ModelState.AddModelError(validationResult.FieldName, validationResult.Message);
-                return View(model);
-            }
-        }
-
         try
         {
             var walletSettings = GetFromInputWallet(model.Wallet);
@@ -228,10 +207,8 @@ public class ArkController(
                 HttpContext.RequestAborted);
             if (settlementOutcome.Error is not null)
             {
-                // The wallet exists now; only a wallet-scoped check (the stablecoin
-                // destination binding) can still fail. Keep the wallet and surface
-                // the settlement failure as a warning rather than persisting a rule
-                // that can never fund.
+                // Keep the wallet and surface the settlement failure as a warning
+                // rather than persisting a rule that can never fund.
                 settlementSetupWarning =
                     $"Arkade wallet setup succeeded, but settlement was not enabled: {settlementOutcome.Error.Message}";
                 config = config.SetActiveSettlement(null);
