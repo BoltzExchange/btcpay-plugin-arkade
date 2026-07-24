@@ -216,8 +216,8 @@ public class ArkadePaymentMethodConfigTests
     {
         BindingDestination[] destinations =
         [
-            new("Arbitrum One", BindingAsset.Usdt, BindingBridgeKind.Direct),
-            new("Polygon PoS", BindingAsset.Usdt0, BindingBridgeKind.Oft)
+            new("Arbitrum One", BindingAsset.Usdt),
+            new("Polygon PoS", BindingAsset.Usdt0)
         ];
 
         var bindingAsset = UsdSettlementConfiguration.ResolveBindingAsset(

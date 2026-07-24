@@ -38,8 +38,9 @@ Storage lives entirely in the BTCPay plugin: the constructor takes a
 `SwapStorage` implementation (a UniFFI foreign trait — C# implements the
 generated interface) alongside `ClientConfig`. The crate is stateless apart
 from the runtime. Swap rows cross the FFI as opaque json plus denormalized
-`status`/`is_terminal` convenience columns; the derived-key counter is a
-plain `next_key_index()` callback whose strict per-wallet monotonicity —
+`status`/`is_terminal` convenience columns; the required seed comes from the
+wallet's existing mnemonic, and the derived-key counter is a plain
+`next_key_index()` callback whose strict per-wallet monotonicity —
 across restarts and processes — is the host's responsibility (a regressed
 counter re-derives used preimages, a fund-theft vector). Callbacks are
 synchronous, may block on database I/O, and are invoked from the runtime's
@@ -48,11 +49,11 @@ must not call back into the same `BoltzClient`. Failures are thrown as the
 generated binding exception and surface to swap logic as store errors.
 
 Idempotency also lives on the C# side (ledger write-ahead states, unique
-indexes, per-wallet serialization). `create_reverse_swap` is a plain create:
-a crash between Boltz accepting the create and the host persisting the
-outcome can orphan an unfunded remote swap, which is an accepted harmless
-residual. The config's `Debug` output redacts the seed, and the seed is
-zeroized as soon as the core has consumed it.
+indexes, per-wallet serialization). `create_reverse_swap_from_sats` quotes
+and creates in one facade call; a crash between Boltz accepting the create
+and the host persisting the outcome can orphan an unfunded remote swap, which
+is an accepted harmless residual. The seed is zeroized as soon as the core
+has consumed it.
 
 Store adapter tests are pure rust against in-memory `SwapStorage`
 implementations — `cargo test` needs no external services.

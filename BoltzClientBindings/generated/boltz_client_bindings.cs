@@ -801,10 +801,6 @@ static class _UniFFILib {
 
 
 
-
-
-
-
     static _UniFFILib() {
         _UniFFILib.uniffiCheckContractApiVersion();
         _UniFFILib.uniffiCheckApiChecksums();
@@ -864,7 +860,7 @@ static class _UniFFILib {
     [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
     public static extern
 #endif
-     ulong uniffi_boltz_client_bindings_fn_method_boltzclient_create_reverse_swap(ulong @ptr,RustBuffer @prepared
+     ulong uniffi_boltz_client_bindings_fn_method_boltzclient_create_reverse_swap_from_sats(ulong @ptr,RustBuffer @destination,RustBuffer @chain,RustBuffer @asset,ulong @invoiceAmountSats
     );
 
     #if NET8_0_OR_GREATER
@@ -886,18 +882,7 @@ static class _UniFFILib {
     [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
     public static extern
 #endif
-     RustBuffer uniffi_boltz_client_bindings_fn_method_boltzclient_drain_events(ulong @ptr,ref UniffiRustCallStatus _uniffi_out_err
-    );
-
-    #if NET8_0_OR_GREATER
-    [LibraryImport("boltz_client_bindings")]
-    [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-    public static partial
-#else
-    [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
-    public static extern
-#endif
-     RustBuffer uniffi_boltz_client_bindings_fn_method_boltzclient_get_capabilities(ulong @ptr,ref UniffiRustCallStatus _uniffi_out_err
+     RustBuffer uniffi_boltz_client_bindings_fn_method_boltzclient_drain_quote_degradations(ulong @ptr,ref UniffiRustCallStatus _uniffi_out_err
     );
 
     #if NET8_0_OR_GREATER
@@ -920,17 +905,6 @@ static class _UniFFILib {
     public static extern
 #endif
      ulong uniffi_boltz_client_bindings_fn_method_boltzclient_get_swap(ulong @ptr,RustBuffer @swapId
-    );
-
-    #if NET8_0_OR_GREATER
-    [LibraryImport("boltz_client_bindings")]
-    [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-    public static partial
-#else
-    [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
-    public static extern
-#endif
-     ulong uniffi_boltz_client_bindings_fn_method_boltzclient_prepare_from_sats(ulong @ptr,RustBuffer @destination,RustBuffer @chain,RustBuffer @asset,ulong @invoiceAmountSats,RustBuffer @maxSlippageBps
     );
 
     #if NET8_0_OR_GREATER
@@ -1623,7 +1597,7 @@ static class _UniFFILib {
     [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
     public static extern
 #endif
-     ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_create_reverse_swap(
+     ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_create_reverse_swap_from_sats(
     );
 
     #if NET8_0_OR_GREATER
@@ -1645,18 +1619,7 @@ static class _UniFFILib {
     [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
     public static extern
 #endif
-     ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_drain_events(
-    );
-
-    #if NET8_0_OR_GREATER
-    [LibraryImport("boltz_client_bindings")]
-    [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-    public static partial
-#else
-    [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
-    public static extern
-#endif
-     ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_get_capabilities(
+     ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_drain_quote_degradations(
     );
 
     #if NET8_0_OR_GREATER
@@ -1679,17 +1642,6 @@ static class _UniFFILib {
     public static extern
 #endif
      ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_get_swap(
-    );
-
-    #if NET8_0_OR_GREATER
-    [LibraryImport("boltz_client_bindings")]
-    [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-    public static partial
-#else
-    [DllImport("boltz_client_bindings", CallingConvention = CallingConvention.Cdecl)]
-    public static extern
-#endif
-     ushort uniffi_boltz_client_bindings_checksum_method_boltzclient_prepare_from_sats(
     );
 
     #if NET8_0_OR_GREATER
@@ -1791,14 +1743,14 @@ static class _UniFFILib {
     static void uniffiCheckApiChecksums() {
         {
             var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_accept_degraded_quote();
-            if (checksum != 63150) {
-                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_accept_degraded_quote` checksum `63150`, library returned `{checksum}`");
+            if (checksum != 62725) {
+                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_accept_degraded_quote` checksum `62725`, library returned `{checksum}`");
             }
         }
         {
-            var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_create_reverse_swap();
-            if (checksum != 7440) {
-                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_create_reverse_swap` checksum `7440`, library returned `{checksum}`");
+            var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_create_reverse_swap_from_sats();
+            if (checksum != 30178) {
+                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_create_reverse_swap_from_sats` checksum `30178`, library returned `{checksum}`");
             }
         }
         {
@@ -1808,15 +1760,9 @@ static class _UniFFILib {
             }
         }
         {
-            var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_drain_events();
-            if (checksum != 63685) {
-                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_drain_events` checksum `63685`, library returned `{checksum}`");
-            }
-        }
-        {
-            var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_get_capabilities();
-            if (checksum != 14089) {
-                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_get_capabilities` checksum `14089`, library returned `{checksum}`");
+            var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_drain_quote_degradations();
+            if (checksum != 27114) {
+                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_drain_quote_degradations` checksum `27114`, library returned `{checksum}`");
             }
         }
         {
@@ -1832,15 +1778,9 @@ static class _UniFFILib {
             }
         }
         {
-            var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_prepare_from_sats();
-            if (checksum != 44076) {
-                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_prepare_from_sats` checksum `44076`, library returned `{checksum}`");
-            }
-        }
-        {
             var checksum = _UniFFILib.uniffi_boltz_client_bindings_checksum_method_boltzclient_resume_swaps();
-            if (checksum != 57659) {
-                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_resume_swaps` checksum `57659`, library returned `{checksum}`");
+            if (checksum != 48046) {
+                throw new UniffiContractChecksumException($"Boltz.Client: uniffi bindings expected function `uniffi_boltz_client_bindings_checksum_method_boltzclient_resume_swaps` checksum `48046`, library returned `{checksum}`");
             }
         }
         {
@@ -2048,20 +1988,17 @@ public interface IBoltzClient {
     /// `Claiming` for the manager's retry; calling again then is safe.
     /// </summary>
     /// <exception cref="BindingException"></exception>
-    Task<BindingSwap> AcceptDegradedQuote(string @swapId);
+    Task AcceptDegradedQuote(string @swapId);
     /// <exception cref="BindingException"></exception>
-    Task<BindingCreatedSwap> CreateReverseSwap(BindingPreparedSwap @prepared);
+    Task<BindingCreatedSwap> CreateReverseSwapFromSats(string @destination, string @chain, BindingAsset @asset, ulong @invoiceAmountSats);
     BindingDestination[] DestinationsAccepting(string @address);
-    BindingEvent[] DrainEvents();
-    Capabilities GetCapabilities();
+    BindingQuoteDegraded[] DrainQuoteDegradations();
     /// <exception cref="BindingException"></exception>
     Task<BindingSwapLimits> GetLimits();
     /// <exception cref="BindingException"></exception>
     Task<BindingSwap?> GetSwap(string @swapId);
     /// <exception cref="BindingException"></exception>
-    Task<BindingPreparedSwap> PrepareFromSats(string @destination, string @chain, BindingAsset @asset, ulong @invoiceAmountSats, uint? @maxSlippageBps);
-    /// <exception cref="BindingException"></exception>
-    Task<string[]> ResumeSwaps();
+    Task<ulong> ResumeSwaps();
     /// <exception cref="BindingException"></exception>
     Task Shutdown();
 }
@@ -2171,33 +2108,29 @@ public class BoltzClient : IBoltzClient, IDisposable {
     /// `Claiming` for the manager's retry; calling again then is safe.
     /// </summary>
     /// <exception cref="BindingException"></exception>
-    public async Task<BindingSwap> AcceptDegradedQuote(string @swapId) {
-    return await _UniFFIAsync.UniffiRustCallAsync(
+    public async Task AcceptDegradedQuote(string @swapId) {await _UniFFIAsync.UniffiRustCallAsync(
         // Get rust future
         CallWithPointer(thisPtr => {
             return _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_accept_degraded_quote(thisPtr, FfiConverterString.INSTANCE.Lower(@swapId));
         }),
         // Poll
-        (ulong future, IntPtr continuation, ulong data) => _UniFFILib.ffi_boltz_client_bindings_rust_future_poll_rust_buffer(future, continuation, data),
+        (ulong future, IntPtr continuation, ulong data) => _UniFFILib.ffi_boltz_client_bindings_rust_future_poll_void(future, continuation, data),
         // Complete
-        (ulong future, ref UniffiRustCallStatus status) => {
-            return _UniFFILib.ffi_boltz_client_bindings_rust_future_complete_rust_buffer(future, ref status);
+        (ulong future, ref UniffiRustCallStatus status) => {_UniFFILib.ffi_boltz_client_bindings_rust_future_complete_void(future, ref status);
         },
         // Free
-        (ulong future) => _UniFFILib.ffi_boltz_client_bindings_rust_future_free_rust_buffer(future),
-        // Lift
-        (result) => FfiConverterTypeBindingSwap.INSTANCE.Lift(result),
+        (ulong future) => _UniFFILib.ffi_boltz_client_bindings_rust_future_free_void(future),
         // Error
         FfiConverterTypeBindingError.INSTANCE
     );
     }
 
     /// <exception cref="BindingException"></exception>
-    public async Task<BindingCreatedSwap> CreateReverseSwap(BindingPreparedSwap @prepared) {
+    public async Task<BindingCreatedSwap> CreateReverseSwapFromSats(string @destination, string @chain, BindingAsset @asset, ulong @invoiceAmountSats) {
     return await _UniFFIAsync.UniffiRustCallAsync(
         // Get rust future
         CallWithPointer(thisPtr => {
-            return _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_create_reverse_swap(thisPtr, FfiConverterTypeBindingPreparedSwap.INSTANCE.Lower(@prepared));
+            return _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_create_reverse_swap_from_sats(thisPtr, FfiConverterString.INSTANCE.Lower(@destination), FfiConverterString.INSTANCE.Lower(@chain), FfiConverterTypeBindingAsset.INSTANCE.Lower(@asset), FfiConverterUInt64.INSTANCE.Lower(@invoiceAmountSats));
         }),
         // Poll
         (ulong future, IntPtr continuation, ulong data) => _UniFFILib.ffi_boltz_client_bindings_rust_future_poll_rust_buffer(future, continuation, data),
@@ -2222,18 +2155,10 @@ public class BoltzClient : IBoltzClient, IDisposable {
     }
 
 
-    public BindingEvent[] DrainEvents() {
-        return CallWithPointer(thisPtr => FfiConverterSequenceTypeBindingEvent.INSTANCE.Lift(
+    public BindingQuoteDegraded[] DrainQuoteDegradations() {
+        return CallWithPointer(thisPtr => FfiConverterSequenceTypeBindingQuoteDegraded.INSTANCE.Lift(
     _UniffiHelpers.RustCall( (ref UniffiRustCallStatus _status) =>
-    _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_drain_events(thisPtr,  ref _status)
-)));
-    }
-
-
-    public Capabilities GetCapabilities() {
-        return CallWithPointer(thisPtr => FfiConverterTypeCapabilities.INSTANCE.Lift(
-    _UniffiHelpers.RustCall( (ref UniffiRustCallStatus _status) =>
-    _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_get_capabilities(thisPtr,  ref _status)
+    _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_drain_quote_degradations(thisPtr,  ref _status)
 )));
     }
 
@@ -2283,44 +2208,22 @@ public class BoltzClient : IBoltzClient, IDisposable {
     }
 
     /// <exception cref="BindingException"></exception>
-    public async Task<BindingPreparedSwap> PrepareFromSats(string @destination, string @chain, BindingAsset @asset, ulong @invoiceAmountSats, uint? @maxSlippageBps) {
-    return await _UniFFIAsync.UniffiRustCallAsync(
-        // Get rust future
-        CallWithPointer(thisPtr => {
-            return _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_prepare_from_sats(thisPtr, FfiConverterString.INSTANCE.Lower(@destination), FfiConverterString.INSTANCE.Lower(@chain), FfiConverterTypeBindingAsset.INSTANCE.Lower(@asset), FfiConverterUInt64.INSTANCE.Lower(@invoiceAmountSats), FfiConverterOptionalUInt32.INSTANCE.Lower(@maxSlippageBps));
-        }),
-        // Poll
-        (ulong future, IntPtr continuation, ulong data) => _UniFFILib.ffi_boltz_client_bindings_rust_future_poll_rust_buffer(future, continuation, data),
-        // Complete
-        (ulong future, ref UniffiRustCallStatus status) => {
-            return _UniFFILib.ffi_boltz_client_bindings_rust_future_complete_rust_buffer(future, ref status);
-        },
-        // Free
-        (ulong future) => _UniFFILib.ffi_boltz_client_bindings_rust_future_free_rust_buffer(future),
-        // Lift
-        (result) => FfiConverterTypeBindingPreparedSwap.INSTANCE.Lift(result),
-        // Error
-        FfiConverterTypeBindingError.INSTANCE
-    );
-    }
-
-    /// <exception cref="BindingException"></exception>
-    public async Task<string[]> ResumeSwaps() {
+    public async Task<ulong> ResumeSwaps() {
     return await _UniFFIAsync.UniffiRustCallAsync(
         // Get rust future
         CallWithPointer(thisPtr => {
             return _UniFFILib.uniffi_boltz_client_bindings_fn_method_boltzclient_resume_swaps(thisPtr);
         }),
         // Poll
-        (ulong future, IntPtr continuation, ulong data) => _UniFFILib.ffi_boltz_client_bindings_rust_future_poll_rust_buffer(future, continuation, data),
+        (ulong future, IntPtr continuation, ulong data) => _UniFFILib.ffi_boltz_client_bindings_rust_future_poll_u64(future, continuation, data),
         // Complete
         (ulong future, ref UniffiRustCallStatus status) => {
-            return _UniFFILib.ffi_boltz_client_bindings_rust_future_complete_rust_buffer(future, ref status);
+            return _UniFFILib.ffi_boltz_client_bindings_rust_future_complete_u64(future, ref status);
         },
         // Free
-        (ulong future) => _UniFFILib.ffi_boltz_client_bindings_rust_future_free_rust_buffer(future),
+        (ulong future) => _UniFFILib.ffi_boltz_client_bindings_rust_future_free_u64(future),
         // Lift
-        (result) => FfiConverterSequenceString.INSTANCE.Lift(result),
+        (result) => FfiConverterUInt64.INSTANCE.Lift(result),
         // Error
         FfiConverterTypeBindingError.INSTANCE
     );
@@ -2387,8 +2290,7 @@ class FfiConverterTypeBoltzClient: FfiConverter<BoltzClient, ulong> {
 /// call back into the same `BoltzClient` from inside a storage method.
 /// - `swap_json` is opaque; persist it byte-for-byte. `status`/`is_terminal`
 /// are denormalized convenience columns derived from the same swap.
-/// - `upsert_swap` must be durable before returning: in seedless mode the row
-/// carries the swap's only copy of its secrets.
+/// - `upsert_swap` must be durable before returning.
 /// - `next_key_index` must be strictly monotonic per wallet across restarts
 /// and processes (atomicity is the host's job): a regressed counter would
 /// re-derive preimages of past swaps, enabling fund theft.
@@ -2418,8 +2320,7 @@ public interface SwapStorage {
 /// call back into the same `BoltzClient` from inside a storage method.
 /// - `swap_json` is opaque; persist it byte-for-byte. `status`/`is_terminal`
 /// are denormalized convenience columns derived from the same swap.
-/// - `upsert_swap` must be durable before returning: in seedless mode the row
-/// carries the swap's only copy of its secrets.
+/// - `upsert_swap` must be durable before returning.
 /// - `next_key_index` must be strictly monotonic per wallet across restarts
 /// and processes (atomicity is the host's job): a regressed counter would
 /// re-derive preimages of past swaps, enabling fund theft.
@@ -2821,7 +2722,8 @@ public record BindingCreatedSwap (
     string SwapId,
     string Invoice,
     ulong InvoiceAmountSats,
-    ulong TimeoutBlockHeight
+    ulong OutputAmount,
+    ulong BoltzFeeSats
 ) {
 }
 
@@ -2833,7 +2735,8 @@ class FfiConverterTypeBindingCreatedSwap: FfiConverterRustBuffer<BindingCreatedS
             SwapId: FfiConverterString.INSTANCE.Read(stream),
             Invoice: FfiConverterString.INSTANCE.Read(stream),
             InvoiceAmountSats: FfiConverterUInt64.INSTANCE.Read(stream),
-            TimeoutBlockHeight: FfiConverterUInt64.INSTANCE.Read(stream)
+            OutputAmount: FfiConverterUInt64.INSTANCE.Read(stream),
+            BoltzFeeSats: FfiConverterUInt64.INSTANCE.Read(stream)
         );
     }
 
@@ -2842,14 +2745,16 @@ class FfiConverterTypeBindingCreatedSwap: FfiConverterRustBuffer<BindingCreatedS
             + FfiConverterString.INSTANCE.AllocationSize(value.SwapId)
             + FfiConverterString.INSTANCE.AllocationSize(value.Invoice)
             + FfiConverterUInt64.INSTANCE.AllocationSize(value.InvoiceAmountSats)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.TimeoutBlockHeight);
+            + FfiConverterUInt64.INSTANCE.AllocationSize(value.OutputAmount)
+            + FfiConverterUInt64.INSTANCE.AllocationSize(value.BoltzFeeSats);
     }
 
     public override void Write(BindingCreatedSwap value, BigEndianStream stream) {
             FfiConverterString.INSTANCE.Write(value.SwapId, stream);
             FfiConverterString.INSTANCE.Write(value.Invoice, stream);
             FfiConverterUInt64.INSTANCE.Write(value.InvoiceAmountSats, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.TimeoutBlockHeight, stream);
+            FfiConverterUInt64.INSTANCE.Write(value.OutputAmount, stream);
+            FfiConverterUInt64.INSTANCE.Write(value.BoltzFeeSats, stream);
     }
 }
 
@@ -2857,8 +2762,7 @@ class FfiConverterTypeBindingCreatedSwap: FfiConverterRustBuffer<BindingCreatedS
 
 public record BindingDestination (
     string ChainLabel,
-    BindingAsset Asset,
-    BindingBridgeKind BridgeKind
+    BindingAsset Asset
 ) {
 }
 
@@ -2868,88 +2772,53 @@ class FfiConverterTypeBindingDestination: FfiConverterRustBuffer<BindingDestinat
     public override BindingDestination Read(BigEndianStream stream) {
         return new BindingDestination(
             ChainLabel: FfiConverterString.INSTANCE.Read(stream),
-            Asset: FfiConverterTypeBindingAsset.INSTANCE.Read(stream),
-            BridgeKind: FfiConverterTypeBindingBridgeKind.INSTANCE.Read(stream)
+            Asset: FfiConverterTypeBindingAsset.INSTANCE.Read(stream)
         );
     }
 
     public override int AllocationSize(BindingDestination value) {
         return 0
             + FfiConverterString.INSTANCE.AllocationSize(value.ChainLabel)
-            + FfiConverterTypeBindingAsset.INSTANCE.AllocationSize(value.Asset)
-            + FfiConverterTypeBindingBridgeKind.INSTANCE.AllocationSize(value.BridgeKind);
+            + FfiConverterTypeBindingAsset.INSTANCE.AllocationSize(value.Asset);
     }
 
     public override void Write(BindingDestination value, BigEndianStream stream) {
             FfiConverterString.INSTANCE.Write(value.ChainLabel, stream);
             FfiConverterTypeBindingAsset.INSTANCE.Write(value.Asset, stream);
-            FfiConverterTypeBindingBridgeKind.INSTANCE.Write(value.BridgeKind, stream);
     }
 }
 
 
 
-public record BindingPreparedSwap (
-    string DestinationAddress,
-    string DestinationChain,
-    BindingAsset Asset,
-    BindingBridgeKind BridgeKind,
-    ulong OutputAmount,
-    ulong InvoiceAmountSats,
-    ulong BoltzFeeSats,
-    ulong EstimatedOnchainAmount,
-    uint SlippageBps,
-    string PairHash,
-    ulong ExpiresAt
+public record BindingQuoteDegraded (
+    string SwapId,
+    ulong ExpectedUsd,
+    ulong QuotedUsd
 ) {
 }
 
-class FfiConverterTypeBindingPreparedSwap: FfiConverterRustBuffer<BindingPreparedSwap> {
-    public static FfiConverterTypeBindingPreparedSwap INSTANCE = new FfiConverterTypeBindingPreparedSwap();
+class FfiConverterTypeBindingQuoteDegraded: FfiConverterRustBuffer<BindingQuoteDegraded> {
+    public static FfiConverterTypeBindingQuoteDegraded INSTANCE = new FfiConverterTypeBindingQuoteDegraded();
 
-    public override BindingPreparedSwap Read(BigEndianStream stream) {
-        return new BindingPreparedSwap(
-            DestinationAddress: FfiConverterString.INSTANCE.Read(stream),
-            DestinationChain: FfiConverterString.INSTANCE.Read(stream),
-            Asset: FfiConverterTypeBindingAsset.INSTANCE.Read(stream),
-            BridgeKind: FfiConverterTypeBindingBridgeKind.INSTANCE.Read(stream),
-            OutputAmount: FfiConverterUInt64.INSTANCE.Read(stream),
-            InvoiceAmountSats: FfiConverterUInt64.INSTANCE.Read(stream),
-            BoltzFeeSats: FfiConverterUInt64.INSTANCE.Read(stream),
-            EstimatedOnchainAmount: FfiConverterUInt64.INSTANCE.Read(stream),
-            SlippageBps: FfiConverterUInt32.INSTANCE.Read(stream),
-            PairHash: FfiConverterString.INSTANCE.Read(stream),
-            ExpiresAt: FfiConverterUInt64.INSTANCE.Read(stream)
+    public override BindingQuoteDegraded Read(BigEndianStream stream) {
+        return new BindingQuoteDegraded(
+            SwapId: FfiConverterString.INSTANCE.Read(stream),
+            ExpectedUsd: FfiConverterUInt64.INSTANCE.Read(stream),
+            QuotedUsd: FfiConverterUInt64.INSTANCE.Read(stream)
         );
     }
 
-    public override int AllocationSize(BindingPreparedSwap value) {
+    public override int AllocationSize(BindingQuoteDegraded value) {
         return 0
-            + FfiConverterString.INSTANCE.AllocationSize(value.DestinationAddress)
-            + FfiConverterString.INSTANCE.AllocationSize(value.DestinationChain)
-            + FfiConverterTypeBindingAsset.INSTANCE.AllocationSize(value.Asset)
-            + FfiConverterTypeBindingBridgeKind.INSTANCE.AllocationSize(value.BridgeKind)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.OutputAmount)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.InvoiceAmountSats)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.BoltzFeeSats)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.EstimatedOnchainAmount)
-            + FfiConverterUInt32.INSTANCE.AllocationSize(value.SlippageBps)
-            + FfiConverterString.INSTANCE.AllocationSize(value.PairHash)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.ExpiresAt);
+            + FfiConverterString.INSTANCE.AllocationSize(value.SwapId)
+            + FfiConverterUInt64.INSTANCE.AllocationSize(value.ExpectedUsd)
+            + FfiConverterUInt64.INSTANCE.AllocationSize(value.QuotedUsd);
     }
 
-    public override void Write(BindingPreparedSwap value, BigEndianStream stream) {
-            FfiConverterString.INSTANCE.Write(value.DestinationAddress, stream);
-            FfiConverterString.INSTANCE.Write(value.DestinationChain, stream);
-            FfiConverterTypeBindingAsset.INSTANCE.Write(value.Asset, stream);
-            FfiConverterTypeBindingBridgeKind.INSTANCE.Write(value.BridgeKind, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.OutputAmount, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.InvoiceAmountSats, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.BoltzFeeSats, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.EstimatedOnchainAmount, stream);
-            FfiConverterUInt32.INSTANCE.Write(value.SlippageBps, stream);
-            FfiConverterString.INSTANCE.Write(value.PairHash, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.ExpiresAt, stream);
+    public override void Write(BindingQuoteDegraded value, BigEndianStream stream) {
+            FfiConverterString.INSTANCE.Write(value.SwapId, stream);
+            FfiConverterUInt64.INSTANCE.Write(value.ExpectedUsd, stream);
+            FfiConverterUInt64.INSTANCE.Write(value.QuotedUsd, stream);
     }
 }
 
@@ -2959,27 +2828,11 @@ public record BindingSwap (
     string Id,
     BindingSwapStatus Status,
     BindingBridgeKind BridgeKind,
-    ulong ChainId,
-    string ClaimAddress,
-    string DestinationAddress,
-    string DestinationChain,
-    BindingAsset Asset,
-    string RefundAddress,
-    string Erc20swapAddress,
-    string RouterAddress,
-    string Invoice,
-    ulong InvoiceAmountSats,
-    ulong OnchainAmount,
     ulong ExpectedOutputAmount,
-    uint SlippageBps,
-    ulong TimeoutBlockHeight,
     string? LockupTxId,
     string? ClaimTxHash,
-    string? PendingCallId,
     ulong? DeliveredAmount,
-    string? BridgeRef,
-    ulong CreatedAt,
-    ulong UpdatedAt
+    string? BridgeRef
 ) {
 }
 
@@ -2991,27 +2844,11 @@ class FfiConverterTypeBindingSwap: FfiConverterRustBuffer<BindingSwap> {
             Id: FfiConverterString.INSTANCE.Read(stream),
             Status: FfiConverterTypeBindingSwapStatus.INSTANCE.Read(stream),
             BridgeKind: FfiConverterTypeBindingBridgeKind.INSTANCE.Read(stream),
-            ChainId: FfiConverterUInt64.INSTANCE.Read(stream),
-            ClaimAddress: FfiConverterString.INSTANCE.Read(stream),
-            DestinationAddress: FfiConverterString.INSTANCE.Read(stream),
-            DestinationChain: FfiConverterString.INSTANCE.Read(stream),
-            Asset: FfiConverterTypeBindingAsset.INSTANCE.Read(stream),
-            RefundAddress: FfiConverterString.INSTANCE.Read(stream),
-            Erc20swapAddress: FfiConverterString.INSTANCE.Read(stream),
-            RouterAddress: FfiConverterString.INSTANCE.Read(stream),
-            Invoice: FfiConverterString.INSTANCE.Read(stream),
-            InvoiceAmountSats: FfiConverterUInt64.INSTANCE.Read(stream),
-            OnchainAmount: FfiConverterUInt64.INSTANCE.Read(stream),
             ExpectedOutputAmount: FfiConverterUInt64.INSTANCE.Read(stream),
-            SlippageBps: FfiConverterUInt32.INSTANCE.Read(stream),
-            TimeoutBlockHeight: FfiConverterUInt64.INSTANCE.Read(stream),
             LockupTxId: FfiConverterOptionalString.INSTANCE.Read(stream),
             ClaimTxHash: FfiConverterOptionalString.INSTANCE.Read(stream),
-            PendingCallId: FfiConverterOptionalString.INSTANCE.Read(stream),
             DeliveredAmount: FfiConverterOptionalUInt64.INSTANCE.Read(stream),
-            BridgeRef: FfiConverterOptionalString.INSTANCE.Read(stream),
-            CreatedAt: FfiConverterUInt64.INSTANCE.Read(stream),
-            UpdatedAt: FfiConverterUInt64.INSTANCE.Read(stream)
+            BridgeRef: FfiConverterOptionalString.INSTANCE.Read(stream)
         );
     }
 
@@ -3020,54 +2857,22 @@ class FfiConverterTypeBindingSwap: FfiConverterRustBuffer<BindingSwap> {
             + FfiConverterString.INSTANCE.AllocationSize(value.Id)
             + FfiConverterTypeBindingSwapStatus.INSTANCE.AllocationSize(value.Status)
             + FfiConverterTypeBindingBridgeKind.INSTANCE.AllocationSize(value.BridgeKind)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.ChainId)
-            + FfiConverterString.INSTANCE.AllocationSize(value.ClaimAddress)
-            + FfiConverterString.INSTANCE.AllocationSize(value.DestinationAddress)
-            + FfiConverterString.INSTANCE.AllocationSize(value.DestinationChain)
-            + FfiConverterTypeBindingAsset.INSTANCE.AllocationSize(value.Asset)
-            + FfiConverterString.INSTANCE.AllocationSize(value.RefundAddress)
-            + FfiConverterString.INSTANCE.AllocationSize(value.Erc20swapAddress)
-            + FfiConverterString.INSTANCE.AllocationSize(value.RouterAddress)
-            + FfiConverterString.INSTANCE.AllocationSize(value.Invoice)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.InvoiceAmountSats)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.OnchainAmount)
             + FfiConverterUInt64.INSTANCE.AllocationSize(value.ExpectedOutputAmount)
-            + FfiConverterUInt32.INSTANCE.AllocationSize(value.SlippageBps)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.TimeoutBlockHeight)
             + FfiConverterOptionalString.INSTANCE.AllocationSize(value.LockupTxId)
             + FfiConverterOptionalString.INSTANCE.AllocationSize(value.ClaimTxHash)
-            + FfiConverterOptionalString.INSTANCE.AllocationSize(value.PendingCallId)
             + FfiConverterOptionalUInt64.INSTANCE.AllocationSize(value.DeliveredAmount)
-            + FfiConverterOptionalString.INSTANCE.AllocationSize(value.BridgeRef)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.CreatedAt)
-            + FfiConverterUInt64.INSTANCE.AllocationSize(value.UpdatedAt);
+            + FfiConverterOptionalString.INSTANCE.AllocationSize(value.BridgeRef);
     }
 
     public override void Write(BindingSwap value, BigEndianStream stream) {
             FfiConverterString.INSTANCE.Write(value.Id, stream);
             FfiConverterTypeBindingSwapStatus.INSTANCE.Write(value.Status, stream);
             FfiConverterTypeBindingBridgeKind.INSTANCE.Write(value.BridgeKind, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.ChainId, stream);
-            FfiConverterString.INSTANCE.Write(value.ClaimAddress, stream);
-            FfiConverterString.INSTANCE.Write(value.DestinationAddress, stream);
-            FfiConverterString.INSTANCE.Write(value.DestinationChain, stream);
-            FfiConverterTypeBindingAsset.INSTANCE.Write(value.Asset, stream);
-            FfiConverterString.INSTANCE.Write(value.RefundAddress, stream);
-            FfiConverterString.INSTANCE.Write(value.Erc20swapAddress, stream);
-            FfiConverterString.INSTANCE.Write(value.RouterAddress, stream);
-            FfiConverterString.INSTANCE.Write(value.Invoice, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.InvoiceAmountSats, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.OnchainAmount, stream);
             FfiConverterUInt64.INSTANCE.Write(value.ExpectedOutputAmount, stream);
-            FfiConverterUInt32.INSTANCE.Write(value.SlippageBps, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.TimeoutBlockHeight, stream);
             FfiConverterOptionalString.INSTANCE.Write(value.LockupTxId, stream);
             FfiConverterOptionalString.INSTANCE.Write(value.ClaimTxHash, stream);
-            FfiConverterOptionalString.INSTANCE.Write(value.PendingCallId, stream);
             FfiConverterOptionalUInt64.INSTANCE.Write(value.DeliveredAmount, stream);
             FfiConverterOptionalString.INSTANCE.Write(value.BridgeRef, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.CreatedAt, stream);
-            FfiConverterUInt64.INSTANCE.Write(value.UpdatedAt, stream);
     }
 }
 
@@ -3103,42 +2908,8 @@ class FfiConverterTypeBindingSwapLimits: FfiConverterRustBuffer<BindingSwapLimit
 
 
 
-public record Capabilities (
-    string ApiVersion,
-    string UpstreamRevision,
-    bool Seeded
-) {
-}
-
-class FfiConverterTypeCapabilities: FfiConverterRustBuffer<Capabilities> {
-    public static FfiConverterTypeCapabilities INSTANCE = new FfiConverterTypeCapabilities();
-
-    public override Capabilities Read(BigEndianStream stream) {
-        return new Capabilities(
-            ApiVersion: FfiConverterString.INSTANCE.Read(stream),
-            UpstreamRevision: FfiConverterString.INSTANCE.Read(stream),
-            Seeded: FfiConverterBoolean.INSTANCE.Read(stream)
-        );
-    }
-
-    public override int AllocationSize(Capabilities value) {
-        return 0
-            + FfiConverterString.INSTANCE.AllocationSize(value.ApiVersion)
-            + FfiConverterString.INSTANCE.AllocationSize(value.UpstreamRevision)
-            + FfiConverterBoolean.INSTANCE.AllocationSize(value.Seeded);
-    }
-
-    public override void Write(Capabilities value, BigEndianStream stream) {
-            FfiConverterString.INSTANCE.Write(value.ApiVersion, stream);
-            FfiConverterString.INSTANCE.Write(value.UpstreamRevision, stream);
-            FfiConverterBoolean.INSTANCE.Write(value.Seeded, stream);
-    }
-}
-
-
-
 public record ClientConfig (
-    byte[]? Seed,
+    byte[] Seed,
     string ReferralId,
     uint SlippageBps,
     string? ApiUrl,
@@ -3154,7 +2925,7 @@ class FfiConverterTypeClientConfig: FfiConverterRustBuffer<ClientConfig> {
 
     public override ClientConfig Read(BigEndianStream stream) {
         return new ClientConfig(
-            Seed: FfiConverterOptionalByteArray.INSTANCE.Read(stream),
+            Seed: FfiConverterByteArray.INSTANCE.Read(stream),
             ReferralId: FfiConverterString.INSTANCE.Read(stream),
             SlippageBps: FfiConverterUInt32.INSTANCE.Read(stream),
             ApiUrl: FfiConverterOptionalString.INSTANCE.Read(stream),
@@ -3167,7 +2938,7 @@ class FfiConverterTypeClientConfig: FfiConverterRustBuffer<ClientConfig> {
 
     public override int AllocationSize(ClientConfig value) {
         return 0
-            + FfiConverterOptionalByteArray.INSTANCE.AllocationSize(value.Seed)
+            + FfiConverterByteArray.INSTANCE.AllocationSize(value.Seed)
             + FfiConverterString.INSTANCE.AllocationSize(value.ReferralId)
             + FfiConverterUInt32.INSTANCE.AllocationSize(value.SlippageBps)
             + FfiConverterOptionalString.INSTANCE.AllocationSize(value.ApiUrl)
@@ -3178,7 +2949,7 @@ class FfiConverterTypeClientConfig: FfiConverterRustBuffer<ClientConfig> {
     }
 
     public override void Write(ClientConfig value, BigEndianStream stream) {
-            FfiConverterOptionalByteArray.INSTANCE.Write(value.Seed, stream);
+            FfiConverterByteArray.INSTANCE.Write(value.Seed, stream);
             FfiConverterString.INSTANCE.Write(value.ReferralId, stream);
             FfiConverterUInt32.INSTANCE.Write(value.SlippageBps, stream);
             FfiConverterOptionalString.INSTANCE.Write(value.ApiUrl, stream);
@@ -3344,78 +3115,6 @@ class FfiConverterTypeBindingError : FfiConverterRustBuffer<BindingException>, C
 
 
 
-public record BindingEvent {
-
-    public record QuoteDegraded (
-        BindingSwap Swap,
-        ulong ExpectedUsd,
-        ulong QuotedUsd
-    ) : BindingEvent {}
-
-    public record ResyncRequired: BindingEvent {}
-
-
-
-
-}
-
-class FfiConverterTypeBindingEvent : FfiConverterRustBuffer<BindingEvent>{
-    public static FfiConverterRustBuffer<BindingEvent> INSTANCE = new FfiConverterTypeBindingEvent();
-
-    public override BindingEvent Read(BigEndianStream stream) {
-        var value = stream.ReadInt();
-        switch (value) {
-            case 1:
-                return new BindingEvent.QuoteDegraded(
-                    FfiConverterTypeBindingSwap.INSTANCE.Read(stream),
-                    FfiConverterUInt64.INSTANCE.Read(stream),
-                    FfiConverterUInt64.INSTANCE.Read(stream)
-                );
-            case 2:
-                return new BindingEvent.ResyncRequired(
-                );
-            default:
-                throw new InternalException(String.Format("invalid enum value '{0}' in FfiConverterTypeBindingEvent.Read()", value));
-        }
-    }
-
-    public override int AllocationSize(BindingEvent value) {
-        switch (value) {
-            case BindingEvent.QuoteDegraded variant_value:
-                return 4
-                    + FfiConverterTypeBindingSwap.INSTANCE.AllocationSize(variant_value.Swap)
-                    + FfiConverterUInt64.INSTANCE.AllocationSize(variant_value.ExpectedUsd)
-                    + FfiConverterUInt64.INSTANCE.AllocationSize(variant_value.QuotedUsd);
-            case BindingEvent.ResyncRequired variant_value:
-                return 4;
-            default:
-                throw new InternalException(String.Format("invalid enum value '{0}' in FfiConverterTypeBindingEvent.AllocationSize()", value));
-        }
-    }
-
-    public override void Write(BindingEvent value, BigEndianStream stream) {
-        switch (value) {
-            case BindingEvent.QuoteDegraded variant_value:
-                stream.WriteInt(1);
-                FfiConverterTypeBindingSwap.INSTANCE.Write(variant_value.Swap, stream);
-                FfiConverterUInt64.INSTANCE.Write(variant_value.ExpectedUsd, stream);
-                FfiConverterUInt64.INSTANCE.Write(variant_value.QuotedUsd, stream);
-                break;
-            case BindingEvent.ResyncRequired variant_value:
-                stream.WriteInt(2);
-                break;
-            default:
-                throw new InternalException(String.Format("invalid enum value '{0}' in FfiConverterTypeBindingEvent.Write()", value));
-        }
-    }
-}
-
-
-
-
-
-
-
 public record BindingSwapStatus {
 
     public record Created: BindingSwapStatus {}
@@ -3545,37 +3244,6 @@ class FfiConverterTypeBindingSwapStatus : FfiConverterRustBuffer<BindingSwapStat
 
 
 
-class FfiConverterOptionalUInt32: FfiConverterRustBuffer<uint?> {
-    public static FfiConverterOptionalUInt32 INSTANCE = new FfiConverterOptionalUInt32();
-
-    public override uint? Read(BigEndianStream stream) {
-        if (stream.ReadByte() == 0) {
-            return null;
-        }
-        return FfiConverterUInt32.INSTANCE.Read(stream);
-    }
-
-    public override int AllocationSize(uint? value) {
-        if (value == null) {
-            return 1;
-        } else {
-            return 1 + FfiConverterUInt32.INSTANCE.AllocationSize((uint)value);
-        }
-    }
-
-    public override void Write(uint? value, BigEndianStream stream) {
-        if (value == null) {
-            stream.WriteByte(0);
-        } else {
-            stream.WriteByte(1);
-            FfiConverterUInt32.INSTANCE.Write((uint)value, stream);
-        }
-    }
-}
-
-
-
-
 class FfiConverterOptionalUInt64: FfiConverterRustBuffer<ulong?> {
     public static FfiConverterOptionalUInt64 INSTANCE = new FfiConverterOptionalUInt64();
 
@@ -3631,37 +3299,6 @@ class FfiConverterOptionalString: FfiConverterRustBuffer<string?> {
         } else {
             stream.WriteByte(1);
             FfiConverterString.INSTANCE.Write((string)value, stream);
-        }
-    }
-}
-
-
-
-
-class FfiConverterOptionalByteArray: FfiConverterRustBuffer<byte[]?> {
-    public static FfiConverterOptionalByteArray INSTANCE = new FfiConverterOptionalByteArray();
-
-    public override byte[]? Read(BigEndianStream stream) {
-        if (stream.ReadByte() == 0) {
-            return null;
-        }
-        return FfiConverterByteArray.INSTANCE.Read(stream);
-    }
-
-    public override int AllocationSize(byte[]? value) {
-        if (value == null) {
-            return 1;
-        } else {
-            return 1 + FfiConverterByteArray.INSTANCE.AllocationSize((byte[])value);
-        }
-    }
-
-    public override void Write(byte[]? value, BigEndianStream stream) {
-        if (value == null) {
-            stream.WriteByte(0);
-        } else {
-            stream.WriteByte(1);
-            FfiConverterByteArray.INSTANCE.Write((byte[])value, stream);
         }
     }
 }
@@ -3792,24 +3429,24 @@ class FfiConverterSequenceTypeBindingDestination: FfiConverterRustBuffer<Binding
 
 
 
-class FfiConverterSequenceTypeBindingEvent: FfiConverterRustBuffer<BindingEvent[]> {
-    public static FfiConverterSequenceTypeBindingEvent INSTANCE = new FfiConverterSequenceTypeBindingEvent();
+class FfiConverterSequenceTypeBindingQuoteDegraded: FfiConverterRustBuffer<BindingQuoteDegraded[]> {
+    public static FfiConverterSequenceTypeBindingQuoteDegraded INSTANCE = new FfiConverterSequenceTypeBindingQuoteDegraded();
 
-    public override BindingEvent[]  Read(BigEndianStream stream) {
+    public override BindingQuoteDegraded[]  Read(BigEndianStream stream) {
         var length = stream.ReadInt();
         if (length == 0) {
             return [];
         }
 
-        var result = new BindingEvent[length];
-        var readFn = FfiConverterTypeBindingEvent.INSTANCE.Read;
+        var result = new BindingQuoteDegraded[length];
+        var readFn = FfiConverterTypeBindingQuoteDegraded.INSTANCE.Read;
         for (int i = 0; i < length; i++) {
             result[i] = readFn(stream);
         }
         return result;
     }
 
-    public override int AllocationSize(BindingEvent[]  value) {
+    public override int AllocationSize(BindingQuoteDegraded[]  value) {
         var sizeForLength = 4;
 
         // details/1-empty-list-as-default-method-parameter.md
@@ -3817,12 +3454,12 @@ class FfiConverterSequenceTypeBindingEvent: FfiConverterRustBuffer<BindingEvent[
             return sizeForLength;
         }
 
-        var allocationSizeFn = FfiConverterTypeBindingEvent.INSTANCE.AllocationSize;
+        var allocationSizeFn = FfiConverterTypeBindingQuoteDegraded.INSTANCE.AllocationSize;
         var sizeForItems = value.Sum(item => allocationSizeFn(item));
         return sizeForLength + sizeForItems;
     }
 
-    public override void Write(BindingEvent[] value, BigEndianStream stream) {
+    public override void Write(BindingQuoteDegraded[] value, BigEndianStream stream) {
         // details/1-empty-list-as-default-method-parameter.md
         if (value == null) {
             stream.WriteInt(0);
@@ -3830,7 +3467,7 @@ class FfiConverterSequenceTypeBindingEvent: FfiConverterRustBuffer<BindingEvent[
         }
 
         stream.WriteInt(value.Length);
-        var writerFn = FfiConverterTypeBindingEvent.INSTANCE.Write;
+        var writerFn = FfiConverterTypeBindingQuoteDegraded.INSTANCE.Write;
         value.ForEach(item => writerFn(item, stream));
     }
 }

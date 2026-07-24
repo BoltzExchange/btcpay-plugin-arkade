@@ -86,13 +86,13 @@ public sealed class UsdSettlementReconciliationService(
                 client = await stablecoinClient.GetClient(walletTransfers.Key, cancellationToken);
                 if (!_resumedWallets.Contains(walletTransfers.Key))
                 {
-                    var resumed = await client.ResumeSwaps();
+                    var resumedCount = await client.ResumeSwaps();
                     _resumedWallets.Add(walletTransfers.Key);
-                    if (resumed.Length > 0)
+                    if (resumedCount > 0)
                     {
                         logger.LogInformation(
                             "Resumed {SwapCount} native stablecoin swaps for Arkade wallet {WalletId}",
-                            resumed.Length,
+                            resumedCount,
                             walletTransfers.Key);
                     }
                 }
@@ -108,17 +108,8 @@ public sealed class UsdSettlementReconciliationService(
 
             try
             {
-                var events = client.DrainEvents();
-                var degraded = events
-                    .OfType<BindingEvent.QuoteDegraded>()
-                    .GroupBy(@event => @event.Swap.Id)
-                    .ToDictionary(group => group.Key, group => group.Last());
-                if (events.Any(@event => @event is BindingEvent.ResyncRequired))
-                {
-                    logger.LogWarning(
-                        "Native stablecoin event queue overflowed for Arkade wallet {WalletId}; performing a full durable-state resync",
-                        walletTransfers.Key);
-                }
+                var degraded = client.DrainQuoteDegradations()
+                    .ToDictionary(@event => @event.SwapId);
 
                 foreach (var transfer in walletTransfers)
                 {
@@ -240,7 +231,7 @@ public sealed class UsdSettlementReconciliationService(
     internal static async Task<bool> HandleQuoteDegraded(
         UsdSettlementTransferEntity transfer,
         BindingSwap swap,
-        BindingEvent.QuoteDegraded quoteDegraded,
+        BindingQuoteDegraded quoteDegraded,
         IBoltzClient client,
         ILogger logger)
     {

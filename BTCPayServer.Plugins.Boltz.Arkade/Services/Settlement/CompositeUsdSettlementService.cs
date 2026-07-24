@@ -172,18 +172,16 @@ public class CompositeUsdSettlementService(
                 request.Destination.Asset)
             ?? throw new InvalidOperationException(
                 $"{request.Destination.Asset} is not supported on {request.Destination.Network} for this address.");
-        var prepared = await nativeClient.PrepareFromSats(
+        var created = await nativeClient.CreateReverseSwapFromSats(
             request.Destination.Address,
             request.Destination.Network,
             bindingAsset,
-            checked((ulong)nativeInvoiceAmount),
-            null);
-        transfer.InvoiceAmountSats = checked((long)prepared.InvoiceAmountSats);
-        transfer.ExpectedOutputAtomic = checked((long)prepared.OutputAmount);
-        transfer.StableLegFeeSats = checked((long)prepared.BoltzFeeSats);
+            checked((ulong)nativeInvoiceAmount));
+        transfer.InvoiceAmountSats = checked((long)created.InvoiceAmountSats);
+        transfer.ExpectedOutputAtomic = checked((long)created.OutputAmount);
+        transfer.StableLegFeeSats = checked((long)created.BoltzFeeSats);
         transfer.ArkLegFeeSats = arkFeeSats;
 
-        var created = await nativeClient.CreateReverseSwap(prepared);
         // Record the native linkage before validating the response, so even a
         // mismatch cancel keeps the exact swap id in the ledger.
         transfer.RustSwapId = created.SwapId;
@@ -191,8 +189,7 @@ public class CompositeUsdSettlementService(
         var invoice = Bolt11Helper.TryParse(created.Invoice, network)
             ?? throw new InvalidOperationException("The stablecoin reverse swap returned an invalid BOLT11 invoice.");
         var invoiceAmount = checked((long)(invoice.MinimumAmount?.ToUnit(LightMoneyUnit.Satoshi) ?? 0));
-        if (invoiceAmount != transfer.InvoiceAmountSats ||
-            created.InvoiceAmountSats != prepared.InvoiceAmountSats)
+        if (invoiceAmount != transfer.InvoiceAmountSats)
         {
             throw new InvalidOperationException(
                 "The stablecoin reverse-swap invoice amount does not match its quote.");

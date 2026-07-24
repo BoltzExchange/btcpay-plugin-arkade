@@ -280,26 +280,21 @@ public class UsdSettlementReconciliationStateTests
 
     // Evidence persistence doesn't branch on the route, so one direct and one
     // bridged row are representative.
-    public static TheoryData<BindingAsset, BindingBridgeKind, string> StablecoinRoutes => new()
+    public static TheoryData<BindingBridgeKind> StablecoinRoutes => new()
     {
-        { BindingAsset.Usdt, BindingBridgeKind.Direct, "Arbitrum" },
-        { BindingAsset.Usdt0, BindingBridgeKind.Oft, "Solana" }
+        BindingBridgeKind.Direct,
+        BindingBridgeKind.Oft
     };
 
     [Theory]
     [MemberData(nameof(StablecoinRoutes))]
-    public void TransactionEvidence_IsPersistedWithoutAStateTransition(
-        BindingAsset asset,
-        BindingBridgeKind bridgeKind,
-        string destinationChain)
+    public void TransactionEvidence_IsPersistedWithoutAStateTransition(BindingBridgeKind bridgeKind)
     {
         var transfer = Transfer(UsdSettlementState.BridgeSettling);
         transfer.BridgeKind = null;
         var swap = NativeSwap(
             new BindingSwapStatus.Settling(),
-            asset: asset,
             bridgeKind: bridgeKind,
-            destinationChain: destinationChain,
             lockupTxId: "tbtc-lockup-tx",
             claimTxHash: "arbitrum-claim-tx",
             bridgeRef: "bridge-reference");
@@ -372,7 +367,7 @@ public class UsdSettlementReconciliationStateTests
         var changed = await UsdSettlementReconciliationService.HandleQuoteDegraded(
             transfer,
             swap,
-            new BindingEvent.QuoteDegraded(swap, ExpectedUsd: 10_000, QuotedUsd: 9_500),
+            new BindingQuoteDegraded(swap.Id, ExpectedUsd: 10_000, QuotedUsd: 9_500),
             client,
             NullLogger.Instance);
 
@@ -394,7 +389,7 @@ public class UsdSettlementReconciliationStateTests
         var changed = await UsdSettlementReconciliationService.HandleQuoteDegraded(
             transfer,
             swap,
-            new BindingEvent.QuoteDegraded(swap, ExpectedUsd: 10_000, QuotedUsd: 9_500),
+            new BindingQuoteDegraded(swap.Id, ExpectedUsd: 10_000, QuotedUsd: 9_500),
             client,
             NullLogger.Instance);
 
@@ -418,7 +413,7 @@ public class UsdSettlementReconciliationStateTests
         var changed = await UsdSettlementReconciliationService.HandleQuoteDegraded(
             transfer,
             swap,
-            new BindingEvent.QuoteDegraded(swap, ExpectedUsd: 10_000, QuotedUsd: 9_500),
+            new BindingQuoteDegraded(swap.Id, ExpectedUsd: 10_000, QuotedUsd: 9_500),
             client,
             NullLogger.Instance);
 
@@ -466,36 +461,30 @@ public class UsdSettlementReconciliationStateTests
         public List<string> AcceptedSwapIds { get; } = [];
         public BindingException? AcceptError { get; init; }
 
-        public Task<BindingSwap> AcceptDegradedQuote(string swapId)
+        public Task AcceptDegradedQuote(string swapId)
         {
             AcceptedSwapIds.Add(swapId);
             if (AcceptError is not null)
                 throw AcceptError;
-            return Task.FromResult(NativeSwap(new BindingSwapStatus.Claiming()));
+            return Task.CompletedTask;
         }
 
-        public Task<BindingCreatedSwap> CreateReverseSwap(BindingPreparedSwap prepared) =>
-            throw new NotSupportedException();
+        public Task<BindingCreatedSwap> CreateReverseSwapFromSats(
+            string destination,
+            string chain,
+            BindingAsset asset,
+            ulong invoiceAmountSats) => throw new NotSupportedException();
 
         public BindingDestination[] DestinationsAccepting(string address) =>
             throw new NotSupportedException();
 
-        public BindingEvent[] DrainEvents() => throw new NotSupportedException();
-
-        public Capabilities GetCapabilities() => throw new NotSupportedException();
+        public BindingQuoteDegraded[] DrainQuoteDegradations() => throw new NotSupportedException();
 
         public Task<BindingSwapLimits> GetLimits() => throw new NotSupportedException();
 
         public Task<BindingSwap?> GetSwap(string swapId) => throw new NotSupportedException();
 
-        public Task<BindingPreparedSwap> PrepareFromSats(
-            string destination,
-            string chain,
-            BindingAsset asset,
-            ulong invoiceAmountSats,
-            uint? maxSlippageBps) => throw new NotSupportedException();
-
-        public Task<string[]> ResumeSwaps() => throw new NotSupportedException();
+        public Task<ulong> ResumeSwaps() => throw new NotSupportedException();
 
         public Task Shutdown() => throw new NotSupportedException();
     }
@@ -504,9 +493,7 @@ public class UsdSettlementReconciliationStateTests
         BindingSwapStatus status,
         ulong expectedOutputAmount = 10_000,
         ulong? deliveredAmount = null,
-        BindingAsset asset = BindingAsset.Usdt0,
         BindingBridgeKind bridgeKind = BindingBridgeKind.Oft,
-        string destinationChain = "Arbitrum",
         string? lockupTxId = null,
         string? claimTxHash = null,
         string? bridgeRef = null) =>
@@ -514,27 +501,11 @@ public class UsdSettlementReconciliationStateTests
             Id: "native-1",
             Status: status,
             BridgeKind: bridgeKind,
-            ChainId: 42_161,
-            ClaimAddress: "claim-address",
-            DestinationAddress: "0x0123456789abcdef",
-            DestinationChain: destinationChain,
-            Asset: asset,
-            RefundAddress: "refund-address",
-            Erc20swapAddress: "erc20-swap-address",
-            RouterAddress: "router-address",
-            Invoice: "lnbc1invoice",
-            InvoiceAmountSats: 10_000,
-            OnchainAmount: 9_900,
             ExpectedOutputAmount: expectedOutputAmount,
-            SlippageBps: 100,
-            TimeoutBlockHeight: 1_000,
             LockupTxId: lockupTxId,
             ClaimTxHash: claimTxHash,
-            PendingCallId: null,
             DeliveredAmount: deliveredAmount,
-            BridgeRef: bridgeRef,
-            CreatedAt: 1,
-            UpdatedAt: 2);
+            BridgeRef: bridgeRef);
 
     private static ArkSwap ArkSwap(ArkSwapStatus status, string? failReason = null) =>
         new(

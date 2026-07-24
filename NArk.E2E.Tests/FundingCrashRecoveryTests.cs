@@ -335,12 +335,10 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
             GetProperty<object>(candidate, "Asset").ToString()!.StartsWith("Usdt", StringComparison.Ordinal));
         var bindingAsset = GetProperty<object>(destination, "Asset");
 
-        var prepareMethod = FindMethod(nativeClient, "PrepareFromSats", 5);
-        var prepared = await AwaitTaskResultAsync(prepareMethod.Invoke(nativeClient,
-            [DestinationAddress, "Arbitrum One", bindingAsset, checked((ulong)invoiceAmountSats), null]))
-            ?? throw new InvalidOperationException("PrepareFromSats returned null");
-        var created = await InvokeTaskResultAsync(nativeClient, "CreateReverseSwap", prepared)
-            ?? throw new InvalidOperationException("CreateReverseSwap returned null");
+        var createMethod = FindMethod(nativeClient, "CreateReverseSwapFromSats", 4);
+        var created = await AwaitTaskResultAsync(createMethod.Invoke(nativeClient,
+            [DestinationAddress, "Arbitrum One", bindingAsset, checked((ulong)invoiceAmountSats)]))
+            ?? throw new InvalidOperationException("CreateReverseSwapFromSats returned null");
 
         var rustSwapId = GetProperty<string>(created, "SwapId");
         var invoice = GetProperty<string>(created, "Invoice");
@@ -360,13 +358,13 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
             DestinationAsset = "USDT",
             DestinationAddress = DestinationAddress,
             SourceAmountSats = SourceAmountSats,
-            InvoiceAmountSats = checked((long)GetProperty<ulong>(prepared, "InvoiceAmountSats")),
-            ExpectedOutputAtomic = checked((long)GetProperty<ulong>(prepared, "OutputAmount")),
+            InvoiceAmountSats = checked((long)GetProperty<ulong>(created, "InvoiceAmountSats")),
+            ExpectedOutputAtomic = checked((long)GetProperty<ulong>(created, "OutputAmount")),
             RustSwapId = rustSwapId,
             Invoice = invoice,
             PaymentHash = parsedInvoice.Hash.ToString(),
             NnarkSwapId = nnarkSwapId,
-            StableLegFeeSats = checked((long)GetProperty<ulong>(prepared, "BoltzFeeSats")),
+            StableLegFeeSats = checked((long)GetProperty<ulong>(created, "BoltzFeeSats")),
             ArkLegFeeSats = quote.TotalFees,
             CreatedAt = now,
             UpdatedAt = now
