@@ -576,7 +576,7 @@ public class ArkController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Failed to load activity counts for wallet {WalletId}", config.WalletId);
+            logger.LogWarning(ex, "Failed to load activity for wallet {WalletId}", config.WalletId);
         }
 
         var pinnedActivity = recentPayments
