@@ -488,10 +488,15 @@ public class ArkController(
                 .Take(5)
                 .ToListAsync(cancellationToken);
 
-            var stablecoinSwapIds = activeStablecoinSettlements
-                .Where(transfer => transfer.NnarkSwapId != null)
+            // Every settlement-owned swap, whatever state its transfer is in: a
+            // Cancelled transfer can still own a Pending submarine swap, and
+            // that swap is settlement plumbing, never user Lightning activity.
+            var stablecoinSwapIds = await db.UsdSettlementTransfers
+                .Where(transfer => transfer.StoreId == store!.Id &&
+                    transfer.WalletId == config.WalletId! &&
+                    transfer.NnarkSwapId != null)
                 .Select(transfer => transfer.NnarkSwapId!)
-                .ToList();
+                .ToListAsync(cancellationToken);
 
             var lightningSwapTypes = new[] { ArkSwapType.ReverseSubmarine, ArkSwapType.Submarine };
             var lightningSwaps = db.Swaps
