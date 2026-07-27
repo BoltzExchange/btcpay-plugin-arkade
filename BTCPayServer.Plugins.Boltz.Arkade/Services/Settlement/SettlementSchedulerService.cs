@@ -392,10 +392,11 @@ public class SettlementSchedulerService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(
+            logger.LogWarning(
                 ex,
-                "Arkade wallet {WalletId} has not yet reached the effective stablecoin swap minimum",
-                walletId);
+                "Arkade wallet {WalletId} could not determine a stablecoin settlement amount for {AmountSats} sats; skipping this pass",
+                walletId,
+                amount);
         }
 
         return null;
