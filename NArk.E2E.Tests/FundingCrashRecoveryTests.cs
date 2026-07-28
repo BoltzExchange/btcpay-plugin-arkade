@@ -73,7 +73,7 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
         // recovery row directly to exercise the independent in-grace branch.
         var withinGrace = await CreateRegisteredTransferAsync(storeId, walletId);
 
-        // The next persisted FundingStarted row is still inside the recovery
+        // The next persisted Funded row is still inside the recovery
         // grace. Run a wallet pass explicitly and prove it performs no write
         // at all: UpdatedAt is the grace clock and must remain unchanged.
         UsdSettlementTransferEntity freshBefore;
@@ -87,7 +87,7 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
         {
             var freshAfter = await db.UsdSettlementTransfers.AsNoTracking()
                 .SingleAsync(x => x.Id == withinGrace.TransferId);
-            Assert.Equal(UsdSettlementState.FundingStarted, freshAfter.State);
+            Assert.Equal(UsdSettlementState.Funded, freshAfter.State);
             Assert.Equal(freshBefore.UpdatedAt, freshAfter.UpdatedAt);
             Assert.True(await HasBlockingTransferAsync(db, walletId));
         }
@@ -158,7 +158,7 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
         var dbOptions = CreateDbOptions();
 
         // Seed the crash clock before broadcasting: funding is in flight while
-        // the only durable ledger fact is a stale FundingStarted row. The
+        // the only durable ledger fact is a stale unbroadcast Funded row. The
         // reconciler either escalates it (swap still unpaid past the grace) or
         // advances it once the swap reports InvoicePaid — both resolve to
         // Completed without a second funding.
@@ -172,7 +172,7 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
         var services = _fixture.ServerTester!.PayTester.ServiceProvider;
         var swapManagement = services.GetRequiredService<SwapsManagementService>();
         // Run a scheduler wallet pass during the crash window and prove it
-        // never double-funds: the FundingStarted row reserves the wallet.
+        // never double-funds: the Funded row reserves the wallet.
         var fundingTask = swapManagement.PayExistingSubmarineSwap(
             walletId, crash.NnarkSwapId, CancellationToken.None);
         await InvokeTaskResultAsync(GetScheduler(), "ProcessWallet", walletId, CancellationToken.None);
@@ -353,7 +353,7 @@ public class FundingCrashRecoveryTests : PlaywrightBaseTest
             Id = transferId,
             StoreId = storeId,
             WalletId = walletId,
-            State = UsdSettlementState.FundingStarted,
+            State = UsdSettlementState.Funded,
             DestinationNetwork = "Arbitrum One",
             DestinationAsset = "USDT",
             DestinationAddress = DestinationAddress,

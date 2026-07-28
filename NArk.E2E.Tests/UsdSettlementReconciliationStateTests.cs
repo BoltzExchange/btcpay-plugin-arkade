@@ -13,7 +13,7 @@ public class UsdSettlementReconciliationStateTests
     [Fact]
     public void CompletedNativeSwap_CompletesWithSettledArkSwap()
     {
-        var transfer = Transfer(UsdSettlementState.ArkLegFunded, error: "old error");
+        var transfer = Transfer(UsdSettlementState.Funded, error: "old error");
         var swap = NativeSwap(new BindingSwapStatus.Completed(), deliveredAmount: 9_750);
         var arkSwap = ArkSwap(ArkSwapStatus.Settled);
 
@@ -34,7 +34,7 @@ public class UsdSettlementReconciliationStateTests
     public void CompletedNativeSwap_WithoutSettledArkSwap_Completes(
         ArkSwapStatus? arkStatus, long? deliveredAmount, long expectedDelivered)
     {
-        var transfer = Transfer(UsdSettlementState.ArkLegFunded);
+        var transfer = Transfer(UsdSettlementState.Funded);
 
         var changed = UsdSettlementReconciliationService.ApplySwapState(
             transfer,
@@ -55,7 +55,7 @@ public class UsdSettlementReconciliationStateTests
     public void CompletedNativeSwap_WithFailedOrRefundedArkSwap_RequiresManualReview(
         ArkSwapStatus arkStatus, string? failReason, string expectedError)
     {
-        var transfer = Transfer(UsdSettlementState.ArkLegFunded);
+        var transfer = Transfer(UsdSettlementState.Funded);
 
         UsdSettlementReconciliationService.ApplySwapState(
             transfer,
@@ -69,7 +69,7 @@ public class UsdSettlementReconciliationStateTests
     [Fact]
     public void FailedNativeSwap_RequiresManualReviewAndPreservesReason()
     {
-        var transfer = Transfer(UsdSettlementState.ArkLegFunded);
+        var transfer = Transfer(UsdSettlementState.Funded);
 
         var changed = UsdSettlementReconciliationService.ApplySwapState(
             transfer,
@@ -130,7 +130,7 @@ public class UsdSettlementReconciliationStateTests
         BindingSwapStatus status,
         UsdSettlementState _)
     {
-        var transfer = Transfer(UsdSettlementState.ArkLegFunded);
+        var transfer = Transfer(UsdSettlementState.Funded);
 
         UsdSettlementReconciliationService.ApplySwapState(
             transfer,
@@ -143,9 +143,11 @@ public class UsdSettlementReconciliationStateTests
 
     public static TheoryData<BindingSwapStatus, UsdSettlementState> ActiveNativeStates => new()
     {
-        { new BindingSwapStatus.InvoicePaid(), UsdSettlementState.ArkLegFunded },
-        { new BindingSwapStatus.TbtcLocked(), UsdSettlementState.TbtcLocked },
-        { new BindingSwapStatus.Claiming(), UsdSettlementState.StableClaiming },
+        // Every native leg between payment and the bridge hand-off maps to the
+        // one Funded state; only Settling moves the row on.
+        { new BindingSwapStatus.InvoicePaid(), UsdSettlementState.Funded },
+        { new BindingSwapStatus.TbtcLocked(), UsdSettlementState.Funded },
+        { new BindingSwapStatus.Claiming(), UsdSettlementState.Funded },
         { new BindingSwapStatus.Settling(), UsdSettlementState.BridgeSettling }
     };
 
@@ -169,8 +171,8 @@ public class UsdSettlementReconciliationStateTests
     [Fact]
     public void CreatedNativeSwap_HasNothingToAdvance()
     {
-        // PreFunding is the initial state and FundingStarted is written only by
-        // the funding path, so a Created native swap changes nothing.
+        // PreFunding is the initial state and Funded is written only by the
+        // funding path, so a Created native swap changes nothing.
         var transfer = Transfer(UsdSettlementState.PreFunding);
 
         var changed = UsdSettlementReconciliationService.ApplySwapState(
@@ -267,7 +269,7 @@ public class UsdSettlementReconciliationStateTests
     [Fact]
     public void ReapplyingSameState_IsIdempotent()
     {
-        var transfer = Transfer(UsdSettlementState.TbtcLocked);
+        var transfer = Transfer(UsdSettlementState.Funded);
 
         var changed = UsdSettlementReconciliationService.ApplySwapState(
             transfer,
@@ -275,7 +277,7 @@ public class UsdSettlementReconciliationStateTests
             null);
 
         Assert.False(changed);
-        Assert.Equal(UsdSettlementState.TbtcLocked, transfer.State);
+        Assert.Equal(UsdSettlementState.Funded, transfer.State);
     }
 
     // Evidence persistence doesn't branch on the route, so one direct and one
@@ -316,9 +318,9 @@ public class UsdSettlementReconciliationStateTests
     {
         // The window is measured against UpdatedAt: a live funding pass keeps
         // bumping it, so only rows nothing is driving anymore ever expire. A
-        // stale PreFunding row cancels (provably unfunded); a stale
-        // FundingStarted row escalates to ManualReview, never Cancelled.
-        var transfer = Transfer(UsdSettlementState.FundingStarted);
+        // stale PreFunding row cancels (provably unfunded); a stale unbroadcast
+        // Funded row escalates to ManualReview, never Cancelled.
+        var transfer = Transfer(UsdSettlementState.Funded);
         var expiry = transfer.UpdatedAt + UsdSettlementReconciliationService.RecoveryGracePeriod;
 
         Assert.False(UsdSettlementReconciliationService.IsPastRecoveryGrace(
@@ -328,8 +330,7 @@ public class UsdSettlementReconciliationStateTests
 
     [Theory]
     [InlineData(UsdSettlementState.PreFunding, true)]
-    [InlineData(UsdSettlementState.FundingStarted, true)]
-    [InlineData(UsdSettlementState.ArkLegFunded, true)]
+    [InlineData(UsdSettlementState.Funded, true)]
     [InlineData(UsdSettlementState.BridgeSettling, true)]
     [InlineData(UsdSettlementState.ManualReview, true)]
     [InlineData(UsdSettlementState.Completed, false)]
@@ -339,8 +340,8 @@ public class UsdSettlementReconciliationStateTests
         UsdSettlementState state, bool expected)
     {
         // Terminal rows — Cancelled included — are invisible to reconciliation,
-        // so a FundingStarted row mislabeled Cancelled would never be looked at
-        // again: correctness depends on the cancel guard above.
+        // so a Funded row mislabeled Cancelled would never be looked at again:
+        // correctness depends on the cancel guard above.
         Assert.Equal(
             expected,
             UsdSettlementReconciliationService.BlockingScope.Compile()(Transfer(state)));
@@ -360,7 +361,7 @@ public class UsdSettlementReconciliationStateTests
         // a market-rate sweep — so a degraded quote is just the current market:
         // the reconciler accepts it instead of parking the transfer in
         // ManualReview, and the next tick's Advance picks up the result.
-        var transfer = MatchedTransfer(UsdSettlementState.TbtcLocked);
+        var transfer = MatchedTransfer(UsdSettlementState.Funded);
         var swap = NativeSwap(status);
         var client = new AcceptRecordingClient();
 
@@ -373,7 +374,7 @@ public class UsdSettlementReconciliationStateTests
 
         Assert.False(changed);
         Assert.Equal(["native-1"], client.AcceptedSwapIds);
-        Assert.Equal(UsdSettlementState.TbtcLocked, transfer.State);
+        Assert.Equal(UsdSettlementState.Funded, transfer.State);
         Assert.Null(transfer.Error);
     }
 
@@ -401,7 +402,7 @@ public class UsdSettlementReconciliationStateTests
     [Fact]
     public async Task DegradedQuote_ToleratesAConcurrentStateAdvance()
     {
-        var transfer = MatchedTransfer(UsdSettlementState.TbtcLocked);
+        var transfer = MatchedTransfer(UsdSettlementState.Funded);
         var swap = NativeSwap(new BindingSwapStatus.TbtcLocked());
         var client = new AcceptRecordingClient
         {
@@ -419,7 +420,7 @@ public class UsdSettlementReconciliationStateTests
 
         Assert.False(changed);
         Assert.Equal(["native-1"], client.AcceptedSwapIds);
-        Assert.Equal(UsdSettlementState.TbtcLocked, transfer.State);
+        Assert.Equal(UsdSettlementState.Funded, transfer.State);
         Assert.Null(transfer.Error);
     }
 

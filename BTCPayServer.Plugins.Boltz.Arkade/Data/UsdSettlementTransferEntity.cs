@@ -1,16 +1,13 @@
 namespace BTCPayServer.Plugins.Boltz.Arkade.Data;
 
-// Which external resources already exist during PreFunding is carried by
-// RustSwapId/NnarkSwapId, not by dedicated states — a PreFunding failure is
-// provably unfunded by construction because FundingStarted is durably
-// persisted before any broadcast.
+// Funded is persisted before any broadcast, so a row still in PreFunding is
+// provably unfunded; ArkFundingTxId then says whether the broadcast returned.
+// The detail of a leg in flight — which swaps exist, how far the bridge got —
+// lives in RustSwapId/NnarkSwapId and the native swap, not in extra states.
 public enum UsdSettlementState
 {
     PreFunding,
-    FundingStarted,
-    ArkLegFunded,
-    TbtcLocked,
-    StableClaiming,
+    Funded,
     BridgeSettling,
     Completed,
     Refunded,

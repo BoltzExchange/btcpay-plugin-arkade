@@ -1222,10 +1222,7 @@ public class ArkGreenfieldController(
     private static string MapStablecoinSettlementStatus(UsdSettlementState state) => state switch
     {
         UsdSettlementState.PreFunding => "pending",
-        UsdSettlementState.FundingStarted or
-            UsdSettlementState.ArkLegFunded or
-            UsdSettlementState.TbtcLocked or
-            UsdSettlementState.StableClaiming or
+        UsdSettlementState.Funded or
             UsdSettlementState.BridgeSettling => "processing",
         UsdSettlementState.Completed => "completed",
         UsdSettlementState.Refunded => "refunded",

@@ -84,7 +84,7 @@ public class CompositeUsdSettlementService(
         };
         await InsertTransfer(transfer, cancellationToken);
 
-        // Any failure before FundingStarted is durably persisted is provably
+        // Any failure before Funded is durably persisted is provably
         // unfunded, so it terminates the row right here and the next wallet
         // event starts over with a fresh transfer. Crash windows are covered
         // by the reconciler's stale-PreFunding sweep, not by a resume path.
@@ -112,7 +112,10 @@ public class CompositeUsdSettlementService(
             throw;
         }
 
-        transfer.State = UsdSettlementState.FundingStarted;
+        // Funded is persisted before the broadcast so a crash can never leave a
+        // row that claims to be unfunded while value moved; ArkFundingTxId then
+        // records that the broadcast returned.
+        transfer.State = UsdSettlementState.Funded;
         await UpdateTransfer(transfer, cancellationToken);
 
         try
@@ -122,7 +125,6 @@ public class CompositeUsdSettlementService(
                 transfer.NnarkSwapId!,
                 cancellationToken);
             transfer.ArkFundingTxId = fundingTxId.ToString();
-            transfer.State = UsdSettlementState.ArkLegFunded;
             await UpdateTransfer(transfer, cancellationToken);
         }
         catch (Exception ex)

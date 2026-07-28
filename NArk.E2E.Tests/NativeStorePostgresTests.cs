@@ -155,7 +155,7 @@ public sealed class NativeStorePostgresTests(NativeStorePostgresFixture fixture)
         var loser = await secondContext.UsdSettlementTransfers
             .SingleAsync(transfer => transfer.Id == transferId);
 
-        winner.State = UsdSettlementState.FundingStarted;
+        winner.State = UsdSettlementState.Funded;
         await firstContext.SaveChangesAsync();
 
         // The second context still carries the pre-update xmin; its UPDATE must

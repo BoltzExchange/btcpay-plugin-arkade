@@ -54,8 +54,8 @@ public sealed class UsdSettlementReconciliationService(
             transfer.State != UsdSettlementState.Refunded &&
             transfer.State != UsdSettlementState.Cancelled;
 
-    // The one crash allowance: how long a PreFunding or FundingStarted row may
-    // sit unchanged before it is treated as a crashed attempt rather than a
+    // The one crash allowance: how long a PreFunding or unbroadcast Funded row
+    // may sit unchanged before it is treated as a crashed attempt rather than a
     // live pass still holding the wallet lock. The window is measured against
     // UpdatedAt, so it only ever expires on rows nothing is driving anymore.
     internal static readonly TimeSpan RecoveryGracePeriod = TimeSpan.FromMinutes(10);
@@ -146,12 +146,14 @@ public sealed class UsdSettlementReconciliationService(
                     if (degraded.TryGetValue(swap.Id, out var quoteDegraded))
                         changed |= await HandleQuoteDegraded(transfer, swap, quoteDegraded, client, logger);
 
-                    // A FundingStarted row past the grace whose swap never saw
-                    // the payment is a crashed funding attempt; whether its
-                    // broadcast exists is not locally decidable, so it parks
-                    // for the operator. Funded ones self-advance above the
-                    // moment the swap reports InvoicePaid.
-                    if (transfer.State == UsdSettlementState.FundingStarted &&
+                    // A Funded row past the grace whose broadcast never returned
+                    // a txid and whose swap never saw the payment is a crashed
+                    // funding attempt; whether its broadcast exists is not
+                    // locally decidable, so it parks for the operator. Rows that
+                    // did broadcast self-advance above the moment the swap
+                    // reports InvoicePaid.
+                    if (transfer.State == UsdSettlementState.Funded &&
+                        transfer.ArkFundingTxId is null &&
                         swap.Status is BindingSwapStatus.Created &&
                         IsPastRecoveryGrace(transfer, DateTimeOffset.UtcNow))
                     {
@@ -211,8 +213,8 @@ public sealed class UsdSettlementReconciliationService(
         UsdSettlementTransferEntity transfer,
         CancellationToken cancellationToken)
     {
-        // NnarkSwapId is durably persisted before FundingStarted, so every row
-        // that reaches per-swap reconciliation carries it.
+        // NnarkSwapId is durably persisted before Funded, so every row that
+        // reaches per-swap reconciliation carries it.
         if (transfer.NnarkSwapId is null)
             return null;
 
@@ -333,16 +335,12 @@ public sealed class UsdSettlementReconciliationService(
         switch (swap.Status)
         {
             // BindingSwapStatus.Created has nothing to advance: PreFunding is
-            // the initial state, and FundingStarted is written only by the
-            // funding path, never by reconciliation.
+            // the initial state, and Funded is written only by the funding
+            // path, never by reconciliation.
             case BindingSwapStatus.InvoicePaid:
-                changed |= Advance(transfer, UsdSettlementState.ArkLegFunded);
-                break;
             case BindingSwapStatus.TbtcLocked:
-                changed |= Advance(transfer, UsdSettlementState.TbtcLocked);
-                break;
             case BindingSwapStatus.Claiming:
-                changed |= Advance(transfer, UsdSettlementState.StableClaiming);
+                changed |= Advance(transfer, UsdSettlementState.Funded);
                 break;
             case BindingSwapStatus.Settling:
                 changed |= Advance(transfer, UsdSettlementState.BridgeSettling);
@@ -449,12 +447,9 @@ public sealed class UsdSettlementReconciliationService(
     private static int PipelinePosition(UsdSettlementState state) => state switch
     {
         UsdSettlementState.PreFunding => 0,
-        UsdSettlementState.FundingStarted => 1,
-        UsdSettlementState.ArkLegFunded => 2,
-        UsdSettlementState.TbtcLocked => 3,
-        UsdSettlementState.StableClaiming => 4,
-        UsdSettlementState.BridgeSettling => 5,
-        UsdSettlementState.Completed => 6,
+        UsdSettlementState.Funded => 1,
+        UsdSettlementState.BridgeSettling => 2,
+        UsdSettlementState.Completed => 3,
         // These states never enter Advance. Keeping them outside the pipeline
         // makes an accidental call a no-op instead of depending on enum order.
         UsdSettlementState.Refunded or

@@ -51,10 +51,7 @@ internal static class StablecoinSettlementActivity
     internal static readonly UsdSettlementState[] OngoingStates =
     [
         UsdSettlementState.PreFunding,
-        UsdSettlementState.FundingStarted,
-        UsdSettlementState.ArkLegFunded,
-        UsdSettlementState.TbtcLocked,
-        UsdSettlementState.StableClaiming,
+        UsdSettlementState.Funded,
         UsdSettlementState.BridgeSettling
     ];
 
