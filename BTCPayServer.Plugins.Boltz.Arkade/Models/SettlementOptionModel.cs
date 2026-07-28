@@ -61,7 +61,40 @@ public static class UsdSettlementData
     public static readonly IReadOnlyList<string> Assets =
         [UsdtAsset, UsdcAsset];
 
-    // TODO: Add TRON when settlement and Reown wallet support are implemented for it.
+    // Keep in sync with boltz-web-app's USDT0 and CCTP variant catalogs.
+    // TODO: Add Tron when settlement is end-to-end tested and Reown wallet
+    // support is implemented for it.
     public static readonly IReadOnlyList<string> DestinationChains =
-        ["Arbitrum One", "Ethereum", "Polygon PoS", "Solana"];
+    [
+        "Arbitrum One",
+        "Avalanche",
+        "Base",
+        "Berachain",
+        "Codex",
+        "Conflux eSpace",
+        "Ethereum",
+        "Flare",
+        "Hedera",
+        "HyperEVM",
+        "Ink",
+        "Linea",
+        "Mantle",
+        "MegaETH",
+        "Monad",
+        "Morph",
+        "Optimism",
+        "Plasma",
+        "Plume",
+        "Polygon PoS",
+        "Rootstock",
+        "Sei",
+        "Solana",
+        "Sonic",
+        "Stable",
+        "Tempo",
+        "Unichain",
+        "World Chain",
+        "XDC",
+        "XLayer"
+    ];
 }

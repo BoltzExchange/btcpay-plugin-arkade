@@ -1,20 +1,77 @@
 import { createAppKit } from '@reown/appkit'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { SolanaAdapter } from '@reown/appkit-adapter-solana'
-import { arbitrum, mainnet, polygon, solana } from '@reown/appkit/networks'
+import {
+  arbitrum,
+  avalanche,
+  base,
+  berachain,
+  codex,
+  confluxESpace,
+  flare,
+  hedera,
+  hyperEvm,
+  ink,
+  linea,
+  mainnet,
+  mantle,
+  megaeth,
+  monad,
+  morph,
+  optimism,
+  plasma,
+  plumeMainnet,
+  polygon,
+  rootstock,
+  sei,
+  solana,
+  sonic,
+  stable,
+  tempo,
+  unichain,
+  worldchain,
+  xdc,
+  xLayer
+} from '@reown/appkit/networks'
 
 const containers = [...document.querySelectorAll('[data-stablecoin-wallet]')]
 if (containers.length > 0) {
 
   const projectId = document.querySelector('script[data-reown-project-id]')?.dataset.reownProjectId ||
     'ba2fd40da144b7017436e42851ec62ae'
-  const networks = [arbitrum, mainnet, polygon, solana]
   const networkByChain = {
     'Arbitrum One': arbitrum,
+    Avalanche: avalanche,
+    Base: base,
+    Berachain: berachain,
+    Codex: codex,
+    'Conflux eSpace': confluxESpace,
     Ethereum: mainnet,
+    Flare: flare,
+    Hedera: hedera,
+    HyperEVM: hyperEvm,
+    Ink: ink,
+    Linea: linea,
+    Mantle: mantle,
+    MegaETH: megaeth,
+    Monad: monad,
+    Morph: morph,
+    Optimism: optimism,
+    Plasma: plasma,
+    Plume: plumeMainnet,
     'Polygon PoS': polygon,
-    Solana: solana
+    Rootstock: rootstock,
+    Sei: sei,
+    Solana: solana,
+    Sonic: sonic,
+    Stable: stable,
+    Tempo: tempo,
+    Unichain: unichain,
+    'World Chain': worldchain,
+    XDC: xdc,
+    XLayer: xLayer
   }
+  const networks = Object.values(networkByChain)
   function caipNetworkId(network) {
     return network.caipNetworkId ?? `${network.chainNamespace ?? 'eip155'}:${network.id}`
   }
@@ -22,13 +79,14 @@ if (containers.length > 0) {
     Object.entries(networkByChain).map(([chain, network]) => [caipNetworkId(network), chain])
   )
 
-  // TODO: Add a TRON adapter and destination mapping when TRON settlement ships.
-  const namespaceByChain = {
-    'Arbitrum One': 'eip155',
-    Ethereum: 'eip155',
-    'Polygon PoS': 'eip155',
-    Solana: 'solana'
-  }
+  // TODO: Add a Tron adapter and destination mapping when Tron settlement is
+  // end-to-end tested.
+  const namespaceByChain = Object.fromEntries(
+    Object.entries(networkByChain).map(([chain, network]) => [
+      chain,
+      network.chainNamespace ?? (chain === 'Solana' ? 'solana' : 'eip155')
+    ])
+  )
 
   const modal = createAppKit({
     adapters: [new EthersAdapter(), new SolanaAdapter()],
@@ -108,7 +166,7 @@ if (containers.length > 0) {
     const network = modal.getCaipNetwork()
     const connectedChain = chainByCaipNetworkId[network?.caipNetworkId]
     if (!namespace || !connectedChain) {
-      setStatus(activeTarget.container, 'Choose Arbitrum, Ethereum, Polygon, or Solana in your wallet.', true)
+      setStatus(activeTarget.container, 'Choose a supported settlement network in your wallet.', true)
       return
     }
 
