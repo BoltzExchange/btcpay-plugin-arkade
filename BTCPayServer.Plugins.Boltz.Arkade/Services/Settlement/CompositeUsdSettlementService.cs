@@ -29,6 +29,7 @@ public class CompositeUsdSettlementService(
     // registration rounds the lockup requirement up. One sat covers that rounding
     // boundary without creating a spend-to-self remainder during a full sweep.
     internal const long ArkFundingReserveSats = 1;
+    private const int StalePairHashAttempts = 3;
 
     public bool Available => stablecoinClient.IsAvailable;
     public string? UnavailableReason => stablecoinClient.UnavailableReason;
@@ -174,11 +175,14 @@ public class CompositeUsdSettlementService(
                 request.Destination.Asset)
             ?? throw new InvalidOperationException(
                 $"{request.Destination.Asset} is not supported on {request.Destination.Network} for this address.");
-        var created = await nativeClient.CreateReverseSwapFromSats(
-            request.Destination.Address,
-            request.Destination.Network,
+        var created = await CreateReverseSwap(
+            nativeClient,
+            request,
+            transfer.Id,
             bindingAsset,
-            checked((ulong)nativeInvoiceAmount));
+            nativeInvoiceAmount,
+            logger,
+            cancellationToken);
         transfer.InvoiceAmountSats = checked((long)created.InvoiceAmountSats);
         transfer.ExpectedOutputAtomic = checked((long)created.OutputAmount);
         transfer.StableLegFeeSats = checked((long)created.BoltzFeeSats);
@@ -213,6 +217,46 @@ public class CompositeUsdSettlementService(
                 $"Ark submarine lockup requires {arkSwap.ExpectedAmount} sats, exceeding the reserved {request.AmountSats} sats.");
         await UpdateTransfer(transfer, cancellationToken);
     }
+
+    // The pair hash the native client quotes with is rejected if Boltz rotates
+    // it before the create lands, which a slow quote can straddle. Nothing is
+    // funded yet and requoting picks up the current hash.
+    internal static async Task<BindingCreatedSwap> CreateReverseSwap(
+        IBoltzClient nativeClient,
+        SettlementTransferRequest request,
+        string transferId,
+        BindingAsset bindingAsset,
+        long nativeInvoiceAmount,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await nativeClient.CreateReverseSwapFromSats(
+                    request.Destination.Address,
+                    request.Destination.Network,
+                    bindingAsset,
+                    checked((ulong)nativeInvoiceAmount));
+            }
+            catch (BindingException.Operation ex)
+                when (attempt < StalePairHashAttempts && IsStalePairHash(ex))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                logger.LogWarning(
+                    "Stablecoin settlement {TransferId}: reverse swap quote went stale before it was created (attempt {Attempt} of {Attempts}), requoting: {Message}",
+                    transferId,
+                    attempt,
+                    StalePairHashAttempts,
+                    ex.message);
+            }
+        }
+    }
+
+    private static bool IsStalePairHash(BindingException.Operation ex) =>
+        ex.code == "api" &&
+        ex.message.Contains("invalid pair hash", StringComparison.OrdinalIgnoreCase);
 
     // Error text is an operator-facing failure summary, not a stack-trace
     // archive: truncate at write so pathological exception text can never
