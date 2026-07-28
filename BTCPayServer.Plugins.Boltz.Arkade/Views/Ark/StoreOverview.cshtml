@@ -9,6 +9,11 @@
 @inject DisplayFormatter DisplayFormatter
 @inject IScopeProvider ScopeProvider
 
+@section PageHeadContent
+{
+    <link rel="stylesheet" href="~/Resources/css/ark-plugin.css" asp-append-version="true" />
+}
+
 @{
     ViewData.SetActivePage(category: "Ark", activePage: "StoreOverview", title: "Arkade");
     var storeId = ScopeProvider.GetCurrentStoreId();
@@ -218,6 +223,7 @@
                             <div class="fw-semibold" data-testid="activity-title">@payment.Title</div>
                             <span class="badge rounded-pill @badgeClass" data-testid="activity-badge">@badgeLabel</span>
                         </div>
+                        @{ var detailId = $"ActivityDetail-{index}"; }
                         <div class="text-muted small">
                             @if (!string.IsNullOrEmpty(payment.Description))
                             {
@@ -236,14 +242,17 @@
                                 <span> - </span>
                             }
                             <span>@payment.Date.ToLocalTime().ToString("g")</span>
+                            @if (!string.IsNullOrEmpty(payment.DetailText))
+                            {
+                                <span> - </span>
+                                <button class="activity-detail-toggle d-inline-flex align-items-center gap-1 align-baseline btn btn-link btn-sm text-secondary p-0" type="button" data-bs-toggle="collapse" data-bs-target="#@detailId" aria-expanded="false" aria-controls="@detailId" data-testid="activity-detail-toggle">
+                                    <span>Details</span>
+                                    <vc:icon symbol="caret-down" />
+                                </button>
+                            }
                         </div>
                         @if (!string.IsNullOrEmpty(payment.DetailText))
                         {
-                            var detailId = $"ActivityDetail-{index}";
-                            <button class="d-inline-flex align-items-center btn btn-link btn-sm text-secondary p-0 mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#@detailId" aria-expanded="false" aria-controls="@detailId" data-testid="activity-detail-toggle">
-                                <vc:icon symbol="caret-down" />
-                                <span class="ms-1">Details</span>
-                            </button>
                             <div id="@detailId" class="collapse">
                                 <div class="text-secondary small text-break mt-1" data-testid="activity-detail-text">@payment.DetailText</div>
                             </div>
