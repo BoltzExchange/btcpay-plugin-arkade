@@ -220,7 +220,12 @@ btcpay-plugin-arkade/
 
 ### Release Process
 
-Bump `<Version>` in `BTCPayServer.Plugins.Boltz.Arkade.csproj`, update `CHANGELOG.md` (with an otherwise clean working tree), and run `make gh-release` — it packs the plugin with BTCPay's `PluginPacker`, commits the pending changes as the version bump, pushes a signed tag, and creates a draft GitHub release with signed `SHA256SUMS`. See [docs/release-process.md](docs/release-process.md).
+Add the new version entry and release notes to `CHANGELOG.md`, then run
+`make bump-version VERSION=0.2.0`. This updates the plugin, native bindings,
+lockfile, and release-note template versions. Then run `make gh-release` — it
+packs the plugin with BTCPay's `PluginPacker`, commits the pending changes as
+the version bump, pushes a signed tag, and creates a draft GitHub release with
+signed `SHA256SUMS`. See [docs/release-process.md](docs/release-process.md).
 
 ---
 
