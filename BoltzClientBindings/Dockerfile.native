@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1.7
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS validate
+
+ARG DOTNET_RUNTIME_IDENTIFIER
+WORKDIR /work
+COPY BoltzClientBindings/generated/boltz_client_bindings.cs BoltzClientBindings/generated/
+COPY BoltzClientBindings/smoke BoltzClientBindings/smoke/
+COPY BTCPayServer.Plugins.Boltz.Arkade/Native/BoltzClientNativeLibrary.cs BTCPayServer.Plugins.Boltz.Arkade/Native/
+COPY BoltzClientBindings/artifacts/runtimes/${DOTNET_RUNTIME_IDENTIFIER}/native/libboltz_client_bindings.so /work/BoltzClientBindings/artifacts/runtimes/${DOTNET_RUNTIME_IDENTIFIER}/native/libboltz_client_bindings.so
+
+RUN dotnet run \
+    --project BoltzClientBindings/smoke/BoltzClientBindings.Smoke.csproj \
+    --configuration Release

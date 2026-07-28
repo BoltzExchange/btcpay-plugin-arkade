@@ -23,5 +23,8 @@ btcpay-run*.log
 # Uploadable plugin packages produced by the deploy/build-artifact flow
 /artifacts
 
+# Cross-compiled Rust cdylibs
+/BoltzClientBindings/artifacts
+
 # esbuild output; regenerated from Client/ by the BuildStablecoinWalletBundle target
 /BTCPayServer.Plugins.Boltz.Arkade/Resources/js/stablecoin-wallet.js

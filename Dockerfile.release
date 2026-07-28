@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+
+ARG RUST_VERSION
+
+FROM node:22-bookworm-slim AS node
+FROM rust:${RUST_VERSION}-bookworm AS rust
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+COPY --from=node /usr/local/ /usr/local/
+COPY --from=rust /usr/local/cargo/ /usr/local/cargo/
+COPY --from=rust /usr/local/rustup/ /usr/local/rustup/
+
+ENV CARGO_HOME="/usr/local/cargo"
+ENV RUSTUP_HOME="/usr/local/rustup"
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        binutils-aarch64-linux-gnu \
+        ca-certificates \
+        gcc \
+        gcc-aarch64-linux-gnu \
+        git \
+        libc6-dev \
+        libc6-dev-arm64-cross \
+        make \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup target add \
+    aarch64-unknown-linux-gnu \
+    x86_64-unknown-linux-gnu
+
+WORKDIR /src
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=nuget-packages,target=/root/.nuget/packages,sharing=locked \
+    --mount=type=cache,target=/src/BoltzClientBindings/target,sharing=locked \
+    make release
+
+FROM scratch AS artifact
+COPY --from=build /src/release/ /

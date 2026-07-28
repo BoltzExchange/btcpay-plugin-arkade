@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="../generated/boltz_client_bindings.cs" Link="boltz_client_bindings.g.cs" />
+        <Compile Include="../../BTCPayServer.Plugins.Boltz.Arkade/Native/BoltzClientNativeLibrary.cs"
+                 Link="BoltzClientNativeLibrary.cs" />
+        <Content Include="../artifacts/runtimes/**/libboltz_client_bindings.so"
+                 Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)"
+                 CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>

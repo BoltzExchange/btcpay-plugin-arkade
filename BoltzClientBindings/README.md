@@ -25,9 +25,10 @@ sed -i '${/^$/d;}' BoltzClientBindings/generated/boltz_client_bindings.cs
 
 The BTCPay plugin build invokes `cargo build --locked` and fails closed unless
 the native library for the current Linux host is produced and copied beside the
-plugin assembly. A release build uses Cargo's release profile. Cross-building
-and publishing an ARM64 artifact still requires an ARM64 builder/toolchain; it
-must not reuse an x64 `.so`.
+plugin assembly. A release build uses Cargo's release profile. `make release`
+cross-compiles the release library for both `x86_64-unknown-linux-gnu` and
+`aarch64-unknown-linux-gnu`; the non-host target requires its complete GNU
+cross toolchain and libc sysroot.
 
 The managed host creates one native client per Arkade wallet. It derives the
 native 64-byte BIP-39 seed from that store wallet's existing mnemonic. No
