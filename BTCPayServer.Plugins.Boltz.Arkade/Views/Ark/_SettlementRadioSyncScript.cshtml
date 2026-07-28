@@ -1,0 +1,13 @@
+<script>
+    document.querySelectorAll('[data-settlement-form]').forEach(form => {
+        const panels = form.querySelectorAll('[data-settlement-fields]');
+        const sync = () => {
+            const checked = form.querySelector('[data-settlement-radio]:checked');
+            const target = checked?.dataset.settlementTarget;
+            panels.forEach(panel => panel.classList.toggle('d-none', !target || !panel.matches(target)));
+        };
+        form.querySelectorAll('[data-settlement-radio]').forEach(radio =>
+            radio.addEventListener('change', sync));
+        sync();
+    });
+</script>

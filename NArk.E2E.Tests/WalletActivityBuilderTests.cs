@@ -7,6 +7,7 @@ using Xunit;
 
 namespace NArk.E2E.Tests;
 
+[Trait("Category", "Unit")]
 public class WalletActivityBuilderTests
 {
     private static readonly DateTimeOffset BaseTime = new(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);

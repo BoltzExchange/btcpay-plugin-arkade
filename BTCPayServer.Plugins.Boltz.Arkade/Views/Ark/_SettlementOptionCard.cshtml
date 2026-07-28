@@ -1,0 +1,82 @@
+@using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@model SettlementOptionCardViewModel
+
+@{
+    var option = Model.Option;
+    var slug = option.Slug;
+    var optionKey = StoreSettlementOptionKeys.GetKey(option.Type);
+    var fieldsId = string.IsNullOrEmpty(Model.Prefix)
+        ? $"settlement-fields-{slug}"
+        : $"{Model.Prefix}-settlement-fields-{slug}";
+    var formPrefix = $"{Model.Prefix}{option.Type}";
+}
+
+<div class="border rounded p-3 @(option.Available ? "" : "bg-light")"
+     data-testid="settlement-option-@slug"
+     aria-disabled="@(Model.IsInitialSetup ? (bool?)!option.Available : null)">
+    <label class="d-flex gap-2 align-items-start m-0" role="button">
+        <input class="form-check-input mt-1" type="radio" name="activeSettlement"
+               value="@optionKey" data-settlement-radio data-settlement-target="#@fieldsId"
+               checked="@(Model.IsChecked ? "checked" : null)"
+               disabled="@(!option.Available && !Model.IsChecked ? "disabled" : null)" />
+        <span class="min-w-0">
+            <span class="fw-semibold d-flex flex-wrap align-items-center gap-2">
+                @option.Title
+                @if (!option.Available)
+                {
+                    <span class="badge bg-white text-muted border" data-testid="@(Model.IsInitialSetup ? $"settlement-option-{slug}-disabled" : null)">Unavailable</span>
+                }
+                else if (!Model.IsInitialSetup && Model.IsChecked)
+                {
+                    <span class="badge text-bg-info">Active</span>
+                }
+            </span>
+            <span class="@Model.MutedTextClass small d-block">@option.Description</span>
+        </span>
+    </label>
+
+    @if (option.Available && option.Data is { } optionData)
+    {
+        <div id="@fieldsId" data-settlement-fields class="mt-3 @(Model.IsChecked ? "" : "d-none")">
+            @if (option.Type == StoreSettlementOption.BitcoinMainchain)
+            {
+                <partial name="_MainchainSettlementForm"
+                         model="@(new MainchainSettlementFormViewModel
+                         {
+                             Data = optionData,
+                             InputPrefix = formPrefix,
+                             IsInitialSetup = Model.IsInitialSetup
+                         })" />
+            }
+            else if (option.Type == StoreSettlementOption.Usd)
+            {
+                <partial name="_StablecoinSettlementForm"
+                         model="@(new StablecoinSettlementFormViewModel
+                         {
+                             Data = optionData,
+                             InputPrefix = formPrefix,
+                             IsInitialSetup = Model.IsInitialSetup
+                         })" />
+            }
+        </div>
+    }
+    else if (!option.Available)
+    {
+        @if (Model.IsInitialSetup)
+        {
+            <div class="alert alert-warning small mb-0 mt-3"
+                 data-settlement-focus
+                 data-testid="@($"settlement-{slug}-requirement")"
+                 tabindex="-1">
+                @option.UnavailableReason
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-warning small mb-0 mt-3" data-testid="@($"{slug}-settlement-unavailable")">
+                @option.UnavailableReason
+            </div>
+        }
+    }
+</div>

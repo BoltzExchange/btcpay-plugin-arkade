@@ -24,3 +24,10 @@
 .intent-details-row > td {
     padding: 1.5rem 1rem 0 2.65rem;
 }
+
+/* Activity detail disclosure: sits inline in the muted metadata line, so the
+   caret is scaled to that text instead of the full-width default. */
+.activity-detail-toggle > .icon-caret-down {
+    --icon-size: 0.875rem;
+    margin-left: 0;
+}

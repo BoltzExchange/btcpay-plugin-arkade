@@ -1,0 +1,38 @@
+@using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@model MainchainSettlementFormViewModel
+
+@{
+    var optionType = StoreSettlementOption.BitcoinMainchain;
+    var thresholdField = SettlementInputName.Field(optionType, MainchainSettlementData.ThresholdKey);
+    var thresholdInputId = Model.InputPrefix + MainchainSettlementData.ThresholdKey;
+    var thresholdValue = Model.Data.Value<string>(MainchainSettlementData.ThresholdKey);
+    var minSats = Model.Data.Value<long?>(MainchainSettlementData.MinSatsKey);
+    var maxSats = Model.Data.Value<long?>(MainchainSettlementData.MaxSatsKey);
+    var thresholdHelp = minSats is not null && maxSats is not null
+        ? $"Allowed range: {minSats.Value:#,0}-{maxSats.Value:#,0} sats."
+        : "Boltz limits could not be loaded.";
+}
+
+<label for="@thresholdInputId" class="form-label">Settlement threshold</label>
+<div class="input-group">
+    <input id="@thresholdInputId"
+           name="@thresholdField"
+           value="@thresholdValue"
+           class="form-control"
+           type="number"
+           min="@(minSats ?? 0)"
+           max="@maxSats"
+           step="1"
+           placeholder="Minimum"
+           data-settlement-focus="@(Model.IsInitialSetup ? "" : null)"
+           data-testid="@(Model.IsInitialSetup ? "settlement-threshold-input" : null)" />
+    <span class="input-group-text">sats</span>
+</div>
+@if (Model.IsInitialSetup)
+{
+    @Html.ValidationMessage(thresholdField, null, new { @class = "text-danger" })
+}
+<div class="form-text@(Model.IsInitialSetup ? " mt-2" : "")">
+    @thresholdHelp
+</div>

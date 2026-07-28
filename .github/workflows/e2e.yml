@@ -26,6 +26,7 @@ jobs:
       - name: Start regtest stack (BoltzExchange/regtest)
         env:
           ARBITRUM_E2E_RPC_URL: ${{ vars.ARBITRUM_E2E_RPC_URL }}
+          ETHEREUM_E2E_RPC_URL: ${{ vars.ETHEREUM_E2E_RPC_URL }}
         run: make regtest
         timeout-minutes: 20
 

@@ -13,6 +13,7 @@ using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler;
 using BTCPayServer.Plugins.Boltz.Arkade.Payouts.Ark;
 using BTCPayServer.Plugins.Boltz.Arkade.Services;
 using BTCPayServer.Plugins.Boltz.Arkade.Services.Settlement;
+using BTCPayServer.Plugins.Boltz.Arkade.Services.Stablecoin;
 using BTCPayServer.Plugins.Boltz.Arkade.Services.WalletLogger;
 using BTCPayServer.Services.Notifications;
 using BTCPayServer.Services.Reporting;
@@ -331,7 +332,19 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<MainchainSettlementService>();
         services.AddSingleton<ISettlementOption>(sp => sp.GetRequiredService<MainchainSettlementService>());
-        services.AddHostedService(sp => sp.GetRequiredService<MainchainSettlementService>());
+        services.AddSingleton<SettlementSchedulerService>();
+        services.AddHostedService(sp => sp.GetRequiredService<SettlementSchedulerService>());
+        // Breaks the ctor cycle scheduler -> mainchain option -> scheduler:
+        // the option only queues wallets after the container is built.
+        services.AddSingleton(sp =>
+            new Lazy<SettlementSchedulerService>(sp.GetRequiredService<SettlementSchedulerService>));
+
+        services.AddSingleton<StablecoinSwapClient>();
+        services.AddSingleton<IStablecoinSwapClient>(sp => sp.GetRequiredService<StablecoinSwapClient>());
+        services.AddHostedService(sp => sp.GetRequiredService<StablecoinSwapClient>());
+        services.AddSingleton<UsdSettlementOption>();
+        services.AddSingleton<ISettlementOption>(sp => sp.GetRequiredService<UsdSettlementOption>());
+        services.AddHostedService<UsdSettlementReconciliationService>();
 
         services.AddSingleton<BoardingTransactionListener>();
         services.AddHostedService(sp => sp.GetRequiredService<BoardingTransactionListener>());
@@ -359,7 +372,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             services.AddHttpClient<BoltzClient>();
             services.AddHttpClient<CachedBoltzClient>();
             services.AddArkSwapServices();
-            services.AddSingleton<ISettlementService, ArkadeChainSwapSettlementService>();
+            services.AddSingleton<ArkadeChainSwapSettlementService>();
+            services.AddSingleton<CompositeUsdSettlementService>();
+            services.AddSingleton<ISettlementService, DestinationSettlementService>();
 
             // Tag every Boltz swap-creation request with the BTCPay-Arkade
             // referral so Boltz can credit the integration. Mirrors the
@@ -378,6 +393,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             services.AddSingleton<CachedBoltzClient>(_ => null!);
             services.AddSingleton<SwapsManagementService>(_ => null!);
             services.AddSingleton<BoltzLimitsValidator>(_ => null!);
+            services.AddSingleton<CompositeUsdSettlementService>(_ => null!);
             services.AddSingleton<ISettlementService>(_ =>
                 new UnavailableSettlementService("Chain swaps require a configured Boltz endpoint."));
         }

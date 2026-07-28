@@ -1,4 +1,5 @@
 using BTCPayServer.Tests;
+using NArk.Tests.End2End.Common;
 using Xunit;
 
 namespace NArk.E2E.Tests;
@@ -17,6 +18,8 @@ namespace NArk.E2E.Tests;
 public class SharedPluginTestFixture : IDisposable
 {
     public ServerTester? ServerTester { get; private set; }
+
+    private AnvilArbSanitizingProxy? _anvilProxy;
 
     /// <summary>
     /// Called by every test's constructor; starts BTCPay once and reuses
@@ -39,6 +42,21 @@ public class SharedPluginTestFixture : IDisposable
         // Keep the fast cadence for imported/unrolled note redemption, but shorten the
         // threshold so ordinary funded VTXOs are not continuously reserved for renewal.
         Environment.SetEnvironmentVariable("BTCPAY_ARKINTENTTHRESHOLDSECONDS", "1");
+
+        // Point the native stablecoin client at the regtest stack: Boltz API via
+        // nginx, the Arbitrum-mainnet-fork anvil (through the l1BlockNumber
+        // sanitizing proxy), and the local gas sponsor emulator. Overriding
+        // API + RPC also opts stablecoin settlement out of its mainnet-only
+        // default (the fork keeps chain id 42161, so the client's hardcoded
+        // mainnet contract addresses resolve).
+        _anvilProxy = new AnvilArbSanitizingProxy();
+        Environment.SetEnvironmentVariable("BTCPAY_ARKSTABLECOINAPIURL", "http://localhost:9001");
+        Environment.SetEnvironmentVariable("BTCPAY_ARKSTABLECOINARBITRUMRPCURL", _anvilProxy.Url);
+        Environment.SetEnvironmentVariable("BTCPAY_ARKSTABLECOINGASSPONSORURL", "http://localhost:18547/alchemy");
+        // Bridged test swaps stay undeliverable on the fork; without this the
+        // native client would poll production LayerZero/Circle APIs with fork
+        // identifiers for the rest of the suite.
+        Environment.SetEnvironmentVariable("BTCPAY_ARKSTABLECOINDISABLEDELIVERYPOLLING", "true");
 
         var testDir = Path.Combine(Directory.GetCurrentDirectory(), "ArkadePluginTests");
         ServerTester = testInstance.CreateServerTester(testDir, newDb: true);
@@ -69,6 +87,8 @@ public class SharedPluginTestFixture : IDisposable
     {
         ServerTester?.Dispose();
         ServerTester = null;
+        _anvilProxy?.Dispose();
+        _anvilProxy = null;
     }
 }
 

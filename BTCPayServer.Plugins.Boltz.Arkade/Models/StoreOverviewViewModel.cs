@@ -66,6 +66,7 @@ public class RecentPaymentViewModel
     public string? Description { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "BTC";
+    public int? AmountDivisibility { get; set; }
     public string? AmountPrefix { get; set; }
     public string? AmountSubtext { get; set; }
     public bool AmountSubtextSensitive { get; set; }
@@ -77,6 +78,24 @@ public class RecentPaymentViewModel
     /// <summary>Overrides the badge derived from <see cref="PaymentStatus"/>/<see cref="SwapStatus"/> (e.g. boarding rows).</summary>
     public string? BadgeLabel { get; set; }
     public string? BadgeClass { get; set; }
+
+    /// <summary>
+    /// Pins the row into the activity list ahead of the recent-five cap:
+    /// ongoing rows so operators can watch progress, needs-attention
+    /// (ManualReview) rows so they can never age out before an operator acts.
+    /// </summary>
+    public bool KeepVisible { get; set; }
+    public string? ExplorerUrl { get; set; }
+    public string? ExplorerLabel { get; set; }
+
+    /// <summary>Failure/context text shown behind the row's expandable details affordance.</summary>
+    public string? DetailText { get; set; }
+
+    /// <summary>Stablecoin settlement ledger-row id, set on settlement rows.</summary>
+    public string? TransferId { get; set; }
+
+    /// <summary>True only for operator-owned (ManualReview) settlement rows, which offer the Cancel action.</summary>
+    public bool CanCancel { get; set; }
 }
 
 public class StoreOverviewStatViewModel

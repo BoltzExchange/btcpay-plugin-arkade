@@ -109,6 +109,12 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
                     $"threshold is {LatencyThreshold.TotalSeconds:F0}s. " +
                     "Pull the plugin debug log and look at the gap between " +
                     "`UpsertVtxo: inserted` and `invoice_paymentSettled` for the source.");
+
+                // Reuse the settled invoice (outside the timed window) to pin the
+                // Payments report: direct Arkade payments must appear with the
+                // Arkade category and the transaction that created the VTXO on
+                // the invoice's contract.
+                await AssertArkadePaymentsReportAsync(storeId, invoice.Id);
                 return;
             }
             if (current.Status is InvoiceStatus.Invalid)
@@ -126,4 +132,20 @@ public class InvoicePaymentLatencyTests : PlaywrightBaseTest
             "subscriber on the path UpsertVtxo → OnVtxoChanged → paymentService.AddPayment.");
     }
 
+    private async Task AssertArkadePaymentsReportAsync(string storeId, string invoiceId)
+    {
+        IList<object?>? row = null;
+        List<string> fields = [];
+        await PollUntilAsync(async () =>
+        {
+            (fields, var rows) = await QueryPaymentsReportAsync(storeId);
+            row = rows.FirstOrDefault(r => Equals(r[fields.IndexOf("InvoiceId")], invoiceId));
+            return row is not null;
+        }, TimeSpan.FromMinutes(2), "payments report never showed the Arkade payment");
+
+        Assert.Equal("Arkade", row![fields.IndexOf("Category")]);
+        Assert.Equal("ARKADE", row[fields.IndexOf("PaymentMethodId")]);
+        Assert.False(string.IsNullOrWhiteSpace(row[fields.IndexOf("Address")] as string));
+        Assert.False(string.IsNullOrWhiteSpace(row[fields.IndexOf("SettlementTransactionId")] as string));
+    }
 }

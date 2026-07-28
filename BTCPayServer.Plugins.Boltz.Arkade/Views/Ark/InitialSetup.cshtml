@@ -1,6 +1,7 @@
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
 @model BTCPayServer.Plugins.Boltz.Arkade.Models.InitialWalletSetupViewModel
 @inject IScopeProvider ScopeProvider
 
@@ -112,6 +113,8 @@
 </div>
 
 @section PageFootContent {
+    <partial name="_StablecoinWalletScript" model="Model.SettlementOptions" />
+    <partial name="_SettlementRadioSyncScript" />
     <script>
         const showSettlementStep = form => {
             const currentGroup = form.closest('[data-setup-group]');

@@ -1,0 +1,25 @@
+@using BTCPayServer.Plugins.Boltz.Arkade.Helpers
+@using BTCPayServer.Plugins.Boltz.Arkade.Models
+@using BTCPayServer.Plugins.Boltz.Arkade.PaymentHandler
+@model IReadOnlyList<SettlementOptionModel>
+@inject BTCPayServer.Security.ContentSecurityPolicies Csp
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+
+@{
+    // Only widen the CSP and load the Reown bundle when stablecoin settlement is
+    // actually available. Configure() runs during render, before the buffered
+    // response flushes, so it still lands in the Content-Security-Policy header
+    // even though this partial is emitted from the page-foot section.
+    var hasStablecoinWallet = Model.Any(option =>
+        option.Type == StoreSettlementOption.Usd && option.Available);
+    if (hasStablecoinWallet)
+        ReownContentSecurityPolicy.Configure(Csp);
+}
+
+@if (hasStablecoinWallet)
+{
+    <script type="module"
+            src="~/Resources/js/stablecoin-wallet.js"
+            data-reown-project-id="@Configuration["Arkade:ReownProjectId"]"
+            asp-append-version="true"></script>
+}

@@ -6,6 +6,7 @@ using Xunit;
 
 namespace NArk.E2E.Tests;
 
+[Trait("Category", "Unit")]
 public class ArkLightningClientTests
 {
     // BOLT11 spec test vector: 2500 uBTC on mainnet.

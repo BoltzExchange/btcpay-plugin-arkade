@@ -9,6 +9,11 @@
 @inject DisplayFormatter DisplayFormatter
 @inject IScopeProvider ScopeProvider
 
+@section PageHeadContent
+{
+    <link rel="stylesheet" href="~/Resources/css/ark-plugin.css" asp-append-version="true" />
+}
+
 @{
     ViewData.SetActivePage(category: "Ark", activePage: "StoreOverview", title: "Arkade");
     var storeId = ScopeProvider.GetCurrentStoreId();
@@ -218,18 +223,56 @@
                             <div class="fw-semibold" data-testid="activity-title">@payment.Title</div>
                             <span class="badge rounded-pill @badgeClass" data-testid="activity-badge">@badgeLabel</span>
                         </div>
+                        @{ var detailId = $"ActivityDetail-{index}"; }
                         <div class="text-muted small">
                             @if (!string.IsNullOrEmpty(payment.Description))
                             {
-                                <span>@payment.Description - </span>
+                                @if (!string.IsNullOrEmpty(payment.ExplorerUrl))
+                                {
+                                    <a href="@payment.ExplorerUrl"
+                                       target="_blank"
+                                       rel="noreferrer noopener"
+                                       title="@(payment.ExplorerLabel ?? "View transaction")"
+                                       data-testid="activity-explorer-link">@payment.Description</a>
+                                }
+                                else
+                                {
+                                    <span>@payment.Description</span>
+                                }
+                                <span> - </span>
                             }
                             <span>@payment.Date.ToLocalTime().ToString("g")</span>
+                            @if (!string.IsNullOrEmpty(payment.DetailText))
+                            {
+                                <span> - </span>
+                                <button class="activity-detail-toggle d-inline-flex align-items-center gap-1 align-baseline btn btn-link btn-sm text-secondary p-0" type="button" data-bs-toggle="collapse" data-bs-target="#@detailId" aria-expanded="false" aria-controls="@detailId" data-testid="activity-detail-toggle">
+                                    <span>Details</span>
+                                    <vc:icon symbol="caret-down" />
+                                </button>
+                            }
                         </div>
+                        @if (!string.IsNullOrEmpty(payment.DetailText))
+                        {
+                            <div id="@detailId" class="collapse">
+                                <div class="text-secondary small text-break mt-1" data-testid="activity-detail-text">@payment.DetailText</div>
+                            </div>
+                        }
+                        @if (payment.CanCancel && !string.IsNullOrEmpty(payment.TransferId))
+                        {
+                            <form asp-action="CancelStablecoinSettlement"
+                                  method="post"
+                                  asp-route-storeId="@storeId"
+                                  asp-route-transferId="@payment.TransferId"
+                                  class="mt-2"
+                                  onsubmit="return confirm('This dismisses the settlement record. Verify funds manually first.');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm" data-testid="activity-cancel-btn">Cancel</button>
+                            </form>
+                        }
                     </div>
                     <div class="text-sm-end flex-shrink-0">
                         @if (payment.ShowAmount)
                         {
-                            <div class="fw-semibold" data-sensitive>@($"{prefix}{DisplayFormatter.Currency(payment.Amount, payment.Currency)}")</div>
+                            <div class="fw-semibold" data-sensitive>@($"{prefix}{DisplayFormatter.Currency(payment.Amount, payment.Currency, divisibility: payment.AmountDivisibility)}")</div>
                         }
                         @if (!string.IsNullOrEmpty(payment.AmountSubtext))
                         {

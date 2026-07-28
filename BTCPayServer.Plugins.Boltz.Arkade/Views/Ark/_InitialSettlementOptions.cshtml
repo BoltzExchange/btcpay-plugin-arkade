@@ -17,83 +17,43 @@
     </div>
 
     <div class="mb-3">
-        <h3 class="h5 mb-1">Settlement options</h3>
-        <p class="text-secondary mb-0">Configure where Arkade funds settle after setup.</p>
+        <h3 class="h5 mb-1">Settlement</h3>
+        <p class="text-secondary mb-0">Choose one destination for Arkade funds. You can change this later, and only one method settles at a time.</p>
     </div>
 
-    <div class="vstack gap-3 mb-4">
+    @{
+        // Off is the default: creating a wallet without touching this step must
+        // succeed. A validation-error re-render keeps the submitted choice
+        // pre-checked; a submitted selection with no method is the explicit
+        // "Off" choice.
+        var defaultSelectedType = Model.SettlementSelectionSubmitted
+            ? Model.SelectedSettlement
+            : null;
+    }
+    <div class="vstack gap-3 mb-4" data-settlement-form>
+        <div class="border rounded p-3" data-testid="settlement-option-off">
+            <label class="d-flex gap-2 align-items-start m-0" role="button">
+                <input class="form-check-input mt-1" type="radio" name="activeSettlement"
+                       value="@StoreSettlementOptionKeys.None" data-settlement-radio
+                       checked="@(defaultSelectedType is null ? "checked" : null)" />
+                <span>
+                    <span class="fw-semibold d-block">Off</span>
+                    <span class="text-secondary small">Keep funds in the Arkade wallet for now.</span>
+                </span>
+            </label>
+        </div>
+
         @foreach (var option in Model.SettlementOptions)
         {
-            var optionSlug = option.Type switch
-            {
-                StoreSettlementOption.BitcoinMainchain => "mainchain",
-                _ => option.Type.ToString()
-            };
-            var optionTestId = $"settlement-option-{optionSlug}";
-
-            <div class="border rounded p-3 @(option.Available ? "" : "bg-light")"
-                 data-testid="@optionTestId"
-                 aria-disabled="@(!option.Available)">
-                <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
-                    <div class="min-w-0">
-                        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
-                            <div class="fw-semibold">@option.Title</div>
-                            @if (option.Available)
-                            {
-                                <span class="badge bg-light text-muted border">Optional</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-white text-muted border" data-testid="@($"{optionTestId}-disabled")">Unavailable</span>
-                            }
-                        </div>
-                        <p class="text-secondary mb-0">@option.Description</p>
-                    </div>
-                </div>
-
-                @if (option.Available && option.Data is { } mainchainData)
-                {
-                    var thresholdValue = mainchainData.Value<string>(MainchainSettlementData.ThresholdKey);
-                    var minSats = mainchainData.Value<long?>(MainchainSettlementData.MinSatsKey);
-                    var maxSats = mainchainData.Value<long?>(MainchainSettlementData.MaxSatsKey);
-                    var thresholdField = SettlementInputName.Field(option.Type, MainchainSettlementData.ThresholdKey);
-                    var thresholdInputId = $"{prefix}{option.Type}{MainchainSettlementData.ThresholdKey}";
-                    var thresholdHelp = minSats is not null && maxSats is not null
-                        ? $"Leave blank to keep this option disabled. Allowed range: {minSats.Value:#,0}-{maxSats.Value:#,0} sats."
-                        : "Leave blank to keep this option disabled. Boltz limits could not be loaded.";
-
-                    <div class="form-group mt-3">
-                        <label for="@thresholdInputId" class="form-label">Settlement threshold</label>
-                        <div class="input-group">
-                            <input id="@thresholdInputId"
-                                   name="@thresholdField"
-                                   value="@thresholdValue"
-                                   class="form-control"
-                                   type="number"
-                                   min="@(minSats ?? 0)"
-                                   max="@maxSats"
-                                   step="1"
-                                   placeholder="Disabled"
-                                   data-settlement-focus
-                                   data-testid="settlement-threshold-input" />
-                            <span class="input-group-text">sats</span>
-                        </div>
-                        @Html.ValidationMessage(thresholdField, null, new { @class = "text-danger" })
-                        <div class="form-text mt-2">
-                            @thresholdHelp
-                        </div>
-                    </div>
-                }
-                else if (!option.Available)
-                {
-                    <div class="alert alert-warning small mb-0 mt-3"
-                         data-settlement-focus
-                         data-testid="@($"settlement-{optionSlug}-requirement")"
-                         tabindex="-1">
-                        @option.UnavailableReason
-                    </div>
-                }
-            </div>
+            <partial name="_SettlementOptionCard"
+                     model="@(new SettlementOptionCardViewModel
+                     {
+                         Option = option,
+                         IsInitialSetup = true,
+                         IsChecked = option.Available && option.Type == defaultSelectedType,
+                         Prefix = prefix,
+                         MutedTextClass = "text-secondary"
+                     })" />
         }
     </div>
 
