@@ -1,34 +1,73 @@
 import { createAppKit } from '@reown/appkit'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { SolanaAdapter } from '@reown/appkit-adapter-solana'
-import { arbitrum, mainnet, polygon, solana } from '@reown/appkit/networks'
+import {
+  arbitrum,
+  avalanche,
+  base,
+  berachain,
+  codex,
+  hedera,
+  ink,
+  linea,
+  mainnet,
+  monad,
+  optimism,
+  plumeMainnet,
+  polygon,
+  sei,
+  solana,
+  sonic,
+  unichain,
+  worldchain,
+  xdc
+} from '@reown/appkit/networks'
 
 const containers = [...document.querySelectorAll('[data-stablecoin-wallet]')]
 if (containers.length > 0) {
 
   const projectId = document.querySelector('script[data-reown-project-id]')?.dataset.reownProjectId ||
     'ba2fd40da144b7017436e42851ec62ae'
-  const networks = [arbitrum, mainnet, polygon, solana]
-  const networkByChain = {
-    'Arbitrum One': arbitrum,
-    Ethereum: mainnet,
-    'Polygon PoS': polygon,
-    Solana: solana
+  const walletNetworkById = {
+    arbitrum,
+    avalanche,
+    base,
+    berachain,
+    codex,
+    ethereum: mainnet,
+    hedera,
+    ink,
+    linea,
+    monad,
+    optimism,
+    plume: plumeMainnet,
+    polygon,
+    sei,
+    solana,
+    sonic,
+    unichain,
+    worldchain,
+    xdc
   }
+  const networks = Object.values(walletNetworkById)
   function caipNetworkId(network) {
     return network.caipNetworkId ?? `${network.chainNamespace ?? 'eip155'}:${network.id}`
   }
-  const chainByCaipNetworkId = Object.fromEntries(
-    Object.entries(networkByChain).map(([chain, network]) => [caipNetworkId(network), chain])
+  const networkIdByCaipNetworkId = Object.fromEntries(
+    Object.entries(walletNetworkById).map(([networkId, network]) => [
+      caipNetworkId(network),
+      networkId
+    ])
   )
 
-  // TODO: Add a TRON adapter and destination mapping when TRON settlement ships.
-  const namespaceByChain = {
-    'Arbitrum One': 'eip155',
-    Ethereum: 'eip155',
-    'Polygon PoS': 'eip155',
-    Solana: 'solana'
-  }
+  // TODO: Add a Tron adapter and destination mapping when Tron settlement is
+  // end-to-end tested.
+  const namespaceByNetworkId = Object.fromEntries(
+    Object.entries(walletNetworkById).map(([networkId, network]) => [
+      networkId,
+      network.chainNamespace ?? (network === solana ? 'solana' : 'eip155')
+    ])
+  )
 
   const modal = createAppKit({
     adapters: [new EthersAdapter(), new SolanaAdapter()],
@@ -106,20 +145,34 @@ if (containers.length > 0) {
 
     const namespace = modal.getActiveChainNamespace()
     const network = modal.getCaipNetwork()
-    const connectedChain = chainByCaipNetworkId[network?.caipNetworkId]
-    if (!namespace || !connectedChain) {
-      setStatus(activeTarget.container, 'Choose Arbitrum, Ethereum, Polygon, or Solana in your wallet.', true)
+    const connectedNetworkId = networkIdByCaipNetworkId[network?.caipNetworkId]
+    if (!namespace || !connectedNetworkId) {
+      setStatus(activeTarget.container, 'Choose a supported settlement network in your wallet.', true)
       return
     }
 
-    syncSelectedChain(activeTarget, connectedChain)
+    const connectedOption = [...activeTarget.chain.options]
+      .find(option => option.dataset.stablecoinNetwork === connectedNetworkId)
+    const connectedNetworkName = connectedOption?.value ?? connectedNetworkId
+    const supportedAssets = connectedOption?.dataset.stablecoinAssets?.split(' ') ?? []
+    if (!supportedAssets.includes(activeTarget.asset.value)) {
+      syncAddress(activeTarget.address, '')
+      setStatus(
+        activeTarget.container,
+        `${connectedNetworkName} is not available for ${activeTarget.asset.value} settlement.`,
+        true
+      )
+      return
+    }
+
+    syncSelectedChain(activeTarget, connectedNetworkName)
     const address = accountAddress(modal.getAccount(namespace))
     if (!address) {
       syncAddress(activeTarget.address, '')
-      setStatus(activeTarget.container, `Connect a ${connectedChain} wallet to continue.`)
+      setStatus(activeTarget.container, `Connect a ${connectedNetworkName} wallet to continue.`)
     } else {
       syncAddress(activeTarget.address, address)
-      setStatus(activeTarget.container, `${connectedChain} wallet address selected.`)
+      setStatus(activeTarget.container, `${connectedNetworkName} wallet address selected.`)
     }
   }
 
@@ -163,9 +216,33 @@ if (containers.length > 0) {
   modal.subscribeEvents(handleAppKitEvent)
 
   containers.forEach(container => {
+    const asset = container.querySelector('[data-stablecoin-asset]')
     const chain = container.querySelector('[data-stablecoin-chain]')
     const address = container.querySelector('[data-stablecoin-address]')
     const button = container.querySelector('[data-wallet-connect]')
+
+    function filterNetworksForAsset() {
+      const selectedChain = chain.value
+      let selectedChainSupported = selectedChain === ''
+
+      for (const option of chain.querySelectorAll('option[data-stablecoin-assets]')) {
+        const supported = option.dataset.stablecoinAssets.split(' ').includes(asset.value)
+        option.hidden = !supported
+        option.disabled = !supported
+        if (option.value === selectedChain) selectedChainSupported = supported
+      }
+
+      if (selectedChainSupported) return
+
+      chain.value = ''
+      syncAddress(address, '')
+      if (activeTarget?.container === container) activeTarget = null
+      connectingFromBlank = false
+      setStatus(container, `Select a network that supports ${asset.value}.`)
+    }
+
+    asset.addEventListener('change', filterNetworksForAsset)
+    filterNetworksForAsset()
 
     address.addEventListener('input', () => {
       if (!syncingAddress && activeTarget?.container === container) {
@@ -181,7 +258,8 @@ if (containers.length > 0) {
       if (activeTarget?.container === container) activeTarget = null
       connectingFromBlank = false
 
-      const network = networkByChain[chain.value]
+      const selectedNetworkId = chain.selectedOptions[0]?.dataset.stablecoinNetwork
+      const network = walletNetworkById[selectedNetworkId]
       if (!network) {
         setStatus(container, 'Select a network or choose one through Connect wallet.')
         return
@@ -198,11 +276,12 @@ if (containers.length > 0) {
     })
 
     button.addEventListener('click', async () => {
-      const selectedChain = chain.value
-      const network = networkByChain[selectedChain]
-      const namespace = namespaceByChain[selectedChain]
+      const selectedNetworkName = chain.value
+      const selectedNetworkId = chain.selectedOptions[0]?.dataset.stablecoinNetwork
+      const network = walletNetworkById[selectedNetworkId]
+      const namespace = namespaceByNetworkId[selectedNetworkId]
       if (!network || !namespace) {
-        activeTarget = { container, chain, address }
+        activeTarget = { container, asset, chain, address }
         connectingFromBlank = true
         setStatus(container, 'Choose a wallet in Reown…')
         try {
@@ -215,8 +294,8 @@ if (containers.length > 0) {
         return
       }
 
-      activeTarget = { container, chain, address }
-      setStatus(container, `Opening ${selectedChain} wallets…`)
+      activeTarget = { container, asset, chain, address }
+      setStatus(container, `Opening ${selectedNetworkName} wallets…`)
 
       try {
         await switchNetwork(network)

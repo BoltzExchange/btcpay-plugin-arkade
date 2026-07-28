@@ -187,6 +187,92 @@ public class ArkadePaymentMethodConfigTests
         Assert.Equal(expectedAsset, result.Config.Asset);
     }
 
+    [Theory]
+    [InlineData(UsdSettlementData.UsdtAsset)]
+    [InlineData(UsdSettlementData.UsdcAsset)]
+    public void UsdSettlementConfiguration_AcceptsEverySupportedAssetChainPair(string asset)
+    {
+        string[] expectedChains = asset switch
+        {
+            UsdSettlementData.UsdtAsset =>
+            [
+                "Arbitrum One",
+                "Berachain",
+                "Ethereum",
+                "Hedera",
+                "Ink",
+                "Polygon PoS",
+                "Solana",
+                "Unichain"
+            ],
+            UsdSettlementData.UsdcAsset =>
+            [
+                "Arbitrum One",
+                "Avalanche",
+                "Base",
+                "Codex",
+                "Ethereum",
+                "Ink",
+                "Linea",
+                "Monad",
+                "Optimism",
+                "Plume",
+                "Polygon PoS",
+                "Sei",
+                "Solana",
+                "Sonic",
+                "Unichain",
+                "World Chain",
+                "XDC"
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(asset), asset, null)
+        };
+        var supportedNetworks = UsdSettlementData.GetDestinationNetworks(asset);
+        Assert.Equal(expectedChains, supportedNetworks.Select(network => network.DisplayName));
+
+        foreach (var network in supportedNetworks)
+        {
+            var result = UsdSettlementConfiguration.Parse(new SettlementInput
+            {
+                Data = new JObject
+                {
+                    [UsdSettlementData.ThresholdKey] = "50000",
+                    [UsdSettlementData.DestinationChainKey] = network.DisplayName,
+                    [UsdSettlementData.DestinationAddressKey] = "destination",
+                    [UsdSettlementData.AssetKey] = asset
+                }
+            });
+
+            Assert.True(result.IsValid, $"{network.DisplayName}: {result.Error}");
+            Assert.Equal(network.DisplayName, result.Config!.DestinationChain);
+            Assert.Same(network, UsdSettlementData.FindByInternalName(network.InternalName.ToUpperInvariant()));
+            Assert.Same(network, UsdSettlementData.FindByDisplayName(network.DisplayName));
+        }
+    }
+
+    [Theory]
+    [InlineData(UsdSettlementData.UsdtAsset, "Avalanche")]
+    [InlineData(UsdSettlementData.UsdcAsset, "Hedera")]
+    public void UsdSettlementConfiguration_RejectsUnsupportedAssetChainPair(
+        string asset,
+        string chain)
+    {
+        var result = UsdSettlementConfiguration.Parse(new SettlementInput
+        {
+            Data = new JObject
+            {
+                [UsdSettlementData.ThresholdKey] = "50000",
+                [UsdSettlementData.DestinationChainKey] = chain,
+                [UsdSettlementData.DestinationAddressKey] = "destination",
+                [UsdSettlementData.AssetKey] = asset
+            }
+        });
+
+        Assert.False(result.IsValid);
+        Assert.Equal(UsdSettlementData.DestinationChainKey, result.InvalidField);
+        Assert.Contains(asset, Assert.IsType<string>(result.Error));
+    }
+
     [Fact]
     public void UsdSettlementConfiguration_IgnoresAndDropsLegacySlippage()
     {

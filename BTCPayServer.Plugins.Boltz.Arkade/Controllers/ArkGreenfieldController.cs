@@ -1231,23 +1231,11 @@ public class ArkGreenfieldController(
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
     };
 
-    private static string? ParseStablecoinChain(string? chain) => chain?.Trim().ToLowerInvariant() switch
-    {
-        "arbitrum" => "Arbitrum One",
-        "ethereum" => "Ethereum",
-        "polygon" => "Polygon PoS",
-        "solana" => "Solana",
-        _ => chain
-    };
+    private static string? ParseStablecoinChain(string? chain) =>
+        UsdSettlementData.FindByInternalName(chain?.Trim())?.DisplayName ?? chain;
 
-    private static string MapStablecoinChain(string chain) => chain switch
-    {
-        "Arbitrum One" => "arbitrum",
-        "Ethereum" => "ethereum",
-        "Polygon PoS" => "polygon",
-        "Solana" => "solana",
-        _ => chain
-    };
+    private static string MapStablecoinChain(string chain) =>
+        UsdSettlementData.FindByDisplayName(chain)?.InternalName ?? chain;
 
     // Enabled means "this is the store's active settlement method", matching
     // the UI's toggle — never mere config presence: deactivated configs stay

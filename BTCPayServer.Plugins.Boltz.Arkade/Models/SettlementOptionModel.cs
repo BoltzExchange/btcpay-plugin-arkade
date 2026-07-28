@@ -39,6 +39,15 @@ public sealed class MainchainSettlementFormViewModel
     public bool IsInitialSetup { get; init; }
 }
 
+public sealed record UsdSettlementNetwork(
+    string InternalName,
+    string DisplayName,
+    params string[] Assets)
+{
+    public bool Supports(string asset) =>
+        Assets.Contains(asset, StringComparer.Ordinal);
+}
+
 public static class MainchainSettlementData
 {
     public const string ThresholdKey = "thresholdSats";
@@ -61,7 +70,40 @@ public static class UsdSettlementData
     public static readonly IReadOnlyList<string> Assets =
         [UsdtAsset, UsdcAsset];
 
-    // TODO: Add TRON when settlement and Reown wallet support are implemented for it.
-    public static readonly IReadOnlyList<string> DestinationChains =
-        ["Arbitrum One", "Ethereum", "Polygon PoS", "Solana"];
+    // Keep in sync with boltz-web-app's send-enabled USDT0 and USDC chains.
+    // TODO: Add Tron when settlement is end-to-end tested and Reown wallet
+    // support is implemented for it.
+    public static readonly IReadOnlyList<UsdSettlementNetwork> DestinationNetworks =
+    [
+        new("arbitrum", "Arbitrum One", UsdtAsset, UsdcAsset),
+        new("avalanche", "Avalanche", UsdcAsset),
+        new("base", "Base", UsdcAsset),
+        new("berachain", "Berachain", UsdtAsset),
+        new("codex", "Codex", UsdcAsset),
+        new("ethereum", "Ethereum", UsdtAsset, UsdcAsset),
+        new("hedera", "Hedera", UsdtAsset),
+        new("ink", "Ink", UsdtAsset, UsdcAsset),
+        new("linea", "Linea", UsdcAsset),
+        new("monad", "Monad", UsdcAsset),
+        new("optimism", "Optimism", UsdcAsset),
+        new("plume", "Plume", UsdcAsset),
+        new("polygon", "Polygon PoS", UsdtAsset, UsdcAsset),
+        new("sei", "Sei", UsdcAsset),
+        new("solana", "Solana", UsdtAsset, UsdcAsset),
+        new("sonic", "Sonic", UsdcAsset),
+        new("unichain", "Unichain", UsdtAsset, UsdcAsset),
+        new("worldchain", "World Chain", UsdcAsset),
+        new("xdc", "XDC", UsdcAsset)
+    ];
+
+    public static IReadOnlyList<UsdSettlementNetwork> GetDestinationNetworks(string asset) =>
+        DestinationNetworks.Where(network => network.Supports(asset)).ToArray();
+
+    public static UsdSettlementNetwork? FindByInternalName(string? internalName) =>
+        DestinationNetworks.FirstOrDefault(
+            network => network.InternalName.Equals(internalName, StringComparison.OrdinalIgnoreCase));
+
+    public static UsdSettlementNetwork? FindByDisplayName(string? displayName) =>
+        DestinationNetworks.FirstOrDefault(
+            network => network.DisplayName.Equals(displayName, StringComparison.Ordinal));
 }
