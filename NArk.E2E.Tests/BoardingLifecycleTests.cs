@@ -6,7 +6,7 @@ using Xunit.Abstractions;
 namespace NArk.E2E.Tests;
 
 /// <summary>
-/// Boarding lifecycle: generate a boarding address on the receive page, fund it on-chain,
+/// Boarding lifecycle: load the automatically prepared boarding address, fund it on-chain,
 /// watch the deposit appear as boarding balance, then get swept by the batch pipeline into a
 /// spendable offchain VTXO. At the current SDK pin a confirmed-but-unswept boarding UTXO is
 /// not offchain-spendable (accepted AVL-1), so visibility and spendability are asserted as
@@ -34,7 +34,11 @@ public class BoardingLifecycleTests : PlaywrightBaseTest
         var storeId = await CreateStoreWithArkWalletAsync();
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/receive");
-        await Page!.ClickAsync("button[name='command'][value='generate']");
+        var paymentLink = await Page!.Locator("#PaymentLink").GetAttributeAsync("data-text");
+        Assert.NotNull(paymentLink);
+        Assert.StartsWith("bitcoin:", paymentLink);
+        Assert.Contains("?ark=", paymentLink);
+
         // The Link (BIP21) tab is active by default; the boarding address lives in its own tab.
         await Page.ClickAsync("a[href='#boarding-tab']");
         await Page.WaitForSelectorAsync("#BoardingAddress",

@@ -718,7 +718,7 @@ public class ArkController(
     }
 
     /// <summary>
-    /// Receive page: shows existing manual receive address or prompts to generate one.
+    /// Receive page: always shows an active Arkade and boarding address.
     /// </summary>
     [HttpGet("stores/{storeId}/receive")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
@@ -727,62 +727,19 @@ public class ArkController(
         var (store, config, errorResult) = ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
 
-        var model = new ArkReceiveViewModel();
-
         try
         {
-            var existingAddress = await walletService.FindManualReceiveAddress(config!.WalletId!, cancellationToken);
-            if (existingAddress != null)
-                model.Address = existingAddress;
-
-            var existingBoarding = await walletService.FindManualBoardingAddress(config.WalletId!, cancellationToken);
-            if (existingBoarding != null)
-                model.BoardingAddress = existingBoarding;
-        }
-        catch (Exception ex)
-        {
-            TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(ex, "Failed to check receive address");
-        }
-
-        return View(model);
-    }
-
-    [HttpPost("stores/{storeId}/receive")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Receive(string storeId, string command, CancellationToken cancellationToken)
-    {
-        var (store, config, errorResult) = ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        try
-        {
-            var model = new ArkReceiveViewModel();
-            var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
-
-            var contract = await contractService.DeriveContract(
+            var model = await walletService.GetOrCreateManualReceiveAddresses(
                 config!.WalletId!,
-                NextContractPurpose.Receive,
-                ContractActivityState.AwaitingFundsBeforeDeactivate,
-                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
-                cancellationToken: cancellationToken);
-            model.Address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
-
-            var boardingContract = (ArkBoardingContract)await contractService.DeriveContract(
-                config.WalletId!,
-                NextContractPurpose.Boarding,
-                ContractActivityState.AwaitingFundsBeforeDeactivate,
-                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
-                cancellationToken: cancellationToken);
-            model.BoardingAddress = boardingContract.GetOnchainAddress(terms.Network).ToString();
-
+                cancellationToken);
             return View(model);
         }
         catch (Exception ex)
         {
-            TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(ex, "Failed to generate address");
+            TempData[WellKnownTempData.ErrorMessage] = DescribeArkError(ex, "Failed to prepare receive address");
         }
 
-        return RedirectToAction(nameof(Receive), new { storeId });
+        return RedirectToAction(nameof(StoreOverview), new { storeId });
     }
 
     [HttpPost("stores/{storeId}/estimate-fees")]
