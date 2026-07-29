@@ -60,6 +60,10 @@ migration:
 		--context ArkPluginDbContext \
 		--output-dir Data/Migrations
 
+bump-version:
+	@test "$(origin VERSION)" = "command line" || { echo "Usage: make bump-version VERSION=<x.y.z>" >&2; exit 1; }
+	@./scripts/bump-version.sh "$(VERSION)"
+
 release: clean
 	git submodule update --init
 	dotnet publish $(PLUGIN) -c Release -o ./publish
@@ -78,4 +82,4 @@ gh-release: release
 clean:
 	rm -rf ./publish ./release
 
-.PHONY: setup appsettings build run dev regtest regtest-stop regtest-clean test migration release gh-release clean
+.PHONY: setup appsettings build run dev regtest regtest-stop regtest-clean test migration bump-version release gh-release clean
