@@ -1,0 +1,14 @@
+**
+!BoltzClientBindings/generated/
+!BoltzClientBindings/generated/boltz_client_bindings.cs
+!BoltzClientBindings/smoke/
+!BoltzClientBindings/smoke/BoltzClientBindings.Smoke.csproj
+!BoltzClientBindings/smoke/Program.cs
+!BoltzClientBindings/artifacts/
+!BoltzClientBindings/artifacts/runtimes/
+!BoltzClientBindings/artifacts/runtimes/*/
+!BoltzClientBindings/artifacts/runtimes/*/native/
+!BoltzClientBindings/artifacts/runtimes/*/native/libboltz_client_bindings.so
+!BTCPayServer.Plugins.Boltz.Arkade/
+!BTCPayServer.Plugins.Boltz.Arkade/Native/
+!BTCPayServer.Plugins.Boltz.Arkade/Native/BoltzClientNativeLibrary.cs

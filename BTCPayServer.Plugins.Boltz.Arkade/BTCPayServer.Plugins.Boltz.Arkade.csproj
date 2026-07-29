@@ -13,10 +13,9 @@
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>
         <MvcRazorCompileOnPublish>false</MvcRazorCompileOnPublish>
-        <NativeCargoProfile Condition="'$(Configuration)' == 'Release'">release</NativeCargoProfile>
-        <NativeCargoProfile Condition="'$(NativeCargoProfile)' == ''">debug</NativeCargoProfile>
-        <NativeCargoReleaseArg Condition="'$(Configuration)' == 'Release'">--release</NativeCargoReleaseArg>
-        <NativeLibraryPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/target/$(NativeCargoProfile)/libboltz_client_bindings.so</NativeLibraryPath>
+        <NativeLibraryFileName>libboltz_client_bindings.so</NativeLibraryFileName>
+        <NativeLibraryPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/target/debug/$(NativeLibraryFileName)</NativeLibraryPath>
+        <NativeRuntimeAssetsPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/artifacts/runtimes</NativeRuntimeAssetsPath>
         <ClientRoot>$(MSBuildProjectDirectory)/..</ClientRoot>
         <ClientBundle>$(MSBuildProjectDirectory)/Resources/js/stablecoin-wallet.js</ClientBundle>
     </PropertyGroup>
@@ -38,10 +37,19 @@
 
     <Target Name="BuildNativeBoltzClient"
             BeforeTargets="PrepareForBuild"
-            Condition="$([MSBuild]::IsOSPlatform('Linux'))">
-        <Exec Command="cargo build --locked $(NativeCargoReleaseArg) --manifest-path &quot;$(MSBuildProjectDirectory)/../BoltzClientBindings/Cargo.toml&quot;" />
+            Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$(Configuration)' != 'Release'">
+        <Exec Command="cargo build --locked --manifest-path &quot;$(MSBuildProjectDirectory)/../BoltzClientBindings/Cargo.toml&quot;" />
         <Error Condition="!Exists('$(NativeLibraryPath)')"
                Text="Native Boltz client build succeeded without producing $(NativeLibraryPath)." />
+    </Target>
+
+    <Target Name="ValidateSharedNativeLibraries"
+            BeforeTargets="PrepareForBuild"
+            Condition="'$(Configuration)' == 'Release'">
+        <Error Condition="!Exists('$(NativeRuntimeAssetsPath)/linux-x64/native/$(NativeLibraryFileName)')"
+               Text="Missing linux-x64 Boltz client binding. Run 'make native-runtimes' first." />
+        <Error Condition="!Exists('$(NativeRuntimeAssetsPath)/linux-arm64/native/$(NativeLibraryFileName)')"
+               Text="Missing linux-arm64 Boltz client binding. Run 'make native-runtimes' first." />
     </Target>
 
     <PropertyGroup>
@@ -67,8 +75,13 @@
     <ItemGroup>
         <Compile Include="..\BoltzClientBindings\generated\boltz_client_bindings.cs" Link="Native\boltz_client_bindings.g.cs" />
         <Content Include="$(NativeLibraryPath)"
-                 Condition="$([MSBuild]::IsOSPlatform('Linux'))"
-                 Link="libboltz_client_bindings.so"
+                 Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$(Configuration)' != 'Release'"
+                 Link="$(NativeLibraryFileName)"
+                 CopyToOutputDirectory="PreserveNewest"
+                 CopyToPublishDirectory="PreserveNewest" />
+        <Content Include="$(NativeRuntimeAssetsPath)/**/$(NativeLibraryFileName)"
+                 Condition="'$(Configuration)' == 'Release'"
+                 Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)"
                  CopyToOutputDirectory="PreserveNewest"
                  CopyToPublishDirectory="PreserveNewest" />
         <!-- BTCPayServer -->

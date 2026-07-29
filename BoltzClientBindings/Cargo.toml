@@ -2,7 +2,6 @@
 name = "boltz-client-bindings"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
 publish = false
 
 [lib]
@@ -22,3 +21,4 @@ zeroize = "=1.8.1"
 panic = "unwind"
 lto = true
 codegen-units = 1
+strip = "symbols"

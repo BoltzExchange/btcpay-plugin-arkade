@@ -1,7 +1,11 @@
 PLUGIN := BTCPayServer.Plugins.Boltz.Arkade
+PLUGIN_PACKER := submodules/btcpayserver/BTCPayServer.PluginPacker/BTCPayServer.PluginPacker.csproj
+BINDINGS := BoltzClientBindings
+RUST_VERSION := $(shell sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+X64_RUST_TARGET := x86_64-unknown-linux-gnu
+ARM64_RUST_TARGET := aarch64-unknown-linux-gnu
 VERSION := $(shell sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' $(PLUGIN)/$(PLUGIN).csproj)
-# PluginPacker outputs under the 4-part assembly version (e.g. 2.4.2.0)
-RELEASE_PATH := ./release/$(PLUGIN)/$(VERSION).0
+RELEASE_PATH := ./release/$(PLUGIN)/$(VERSION)
 
 setup:
 	git submodule update --init --recursive
@@ -16,6 +20,36 @@ appsettings:
 
 build:
 	dotnet build $(PLUGIN)
+
+native-runtimes:
+	cargo build --locked --release \
+		--manifest-path $(BINDINGS)/Cargo.toml \
+		--target $(X64_RUST_TARGET)
+	install -D \
+		$(BINDINGS)/target/$(X64_RUST_TARGET)/release/libboltz_client_bindings.so \
+		$(BINDINGS)/artifacts/runtimes/linux-x64/native/libboltz_client_bindings.so
+	cargo build --locked --release \
+		--manifest-path $(BINDINGS)/Cargo.toml \
+		--target $(ARM64_RUST_TARGET)
+	install -D \
+		$(BINDINGS)/target/$(ARM64_RUST_TARGET)/release/libboltz_client_bindings.so \
+		$(BINDINGS)/artifacts/runtimes/linux-arm64/native/libboltz_client_bindings.so
+
+validate-bindings: native-runtimes
+	docker buildx build \
+		--file $(BINDINGS)/Dockerfile.native \
+		--platform linux/amd64 \
+		--target validate \
+		--build-arg DOTNET_RUNTIME_IDENTIFIER=linux-x64 \
+		--progress plain \
+		.
+	docker buildx build \
+		--file $(BINDINGS)/Dockerfile.native \
+		--platform linux/arm64 \
+		--target validate \
+		--build-arg DOTNET_RUNTIME_IDENTIFIER=linux-arm64 \
+		--progress plain \
+		.
 
 run:
 	cd submodules/btcpayserver/BTCPayServer && dotnet run --launch-profile Bitcoin-HTTPS
@@ -64,22 +98,31 @@ bump-version:
 	@test "$(origin VERSION)" = "command line" || { echo "Usage: make bump-version VERSION=<x.y.z>" >&2; exit 1; }
 	@./scripts/bump-version.sh "$(VERSION)"
 
-release: clean
-	git submodule update --init
+release: clean native-runtimes
 	dotnet publish $(PLUGIN) -c Release -o ./publish
-	dotnet run --project submodules/btcpayserver/BTCPayServer.PluginPacker ./publish $(PLUGIN) ./release
+	dotnet restore $(PLUGIN_PACKER) --source ./publish
+	dotnet run --no-restore --project $(PLUGIN_PACKER) -- ./publish $(PLUGIN) ./release
+
+release-docker: clean
+	docker buildx build \
+		--file Dockerfile.release \
+		--build-arg RUST_VERSION=$(RUST_VERSION) \
+		--platform linux/amd64 \
+		--target artifact \
+		--output type=local,dest=./release \
+		.
 
 # Commits ALL pending tracked changes as the version-bump commit.
-gh-release: release
+gh-release: release-docker
 	@! git rev-parse -q --verify refs/tags/v$(VERSION) >/dev/null || { echo "tag v$(VERSION) already exists"; exit 1; }
 	git commit -a -m "chore: bump version to v$(VERSION)"
 	git tag -s v$(VERSION) -m "v$(VERSION)"
 	git push
 	git push --tags
-	cd $(RELEASE_PATH) && gpg --detach-sig SHA256SUMS
+	cd $(RELEASE_PATH) && gpg --yes --armor --output SHA256SUMS.asc --detach-sign SHA256SUMS
 	gh release create v$(VERSION) --title v$(VERSION) --draft --notes-file release-notes-template.md $(RELEASE_PATH)/*
 
 clean:
 	rm -rf ./publish ./release
 
-.PHONY: setup appsettings build run dev regtest regtest-stop regtest-clean test migration bump-version release gh-release clean
+.PHONY: setup appsettings build native-runtimes validate-bindings run dev regtest regtest-stop regtest-clean test migration bump-version release release-docker gh-release clean
