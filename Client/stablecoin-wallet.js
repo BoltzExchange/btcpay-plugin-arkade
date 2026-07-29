@@ -251,28 +251,19 @@ if (containers.length > 0) {
       }
     })
 
-    chain.addEventListener('change', async () => {
+    chain.addEventListener('change', () => {
       if (syncingChain) return
 
       syncAddress(address, '')
       if (activeTarget?.container === container) activeTarget = null
       connectingFromBlank = false
 
-      const selectedNetworkId = chain.selectedOptions[0]?.dataset.stablecoinNetwork
-      const network = walletNetworkById[selectedNetworkId]
-      if (!network) {
+      if (!chain.value) {
         setStatus(container, 'Select a network or choose one through Connect wallet.')
         return
       }
 
-      setStatus(container, `Switching wallet connection to ${chain.value}…`)
-      try {
-        await switchNetwork(network)
-        setStatus(container, `${chain.value} selected. Connect a wallet or enter a new address.`)
-      } catch (error) {
-        console.error('Unable to switch the AppKit network', error)
-        setStatus(container, `Your wallet did not switch to ${chain.value}.`, true)
-      }
+      setStatus(container, `${chain.value} selected. Connect a wallet or enter a new address.`)
     })
 
     button.addEventListener('click', async () => {
