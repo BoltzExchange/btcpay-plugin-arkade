@@ -8,7 +8,7 @@
 
         <Product>Boltz.Arkade</Product>
         <Description>Accept Arkade offchain Bitcoin and Lightning payments in BTCPay Server. Published by Boltz Exchange.</Description>
-        <Version>0.1.0</Version>
+        <Version>0.2.0</Version>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>

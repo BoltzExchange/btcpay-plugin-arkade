@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.0] - 2026-07-29
+
+Initial release of the **Stablecoin Settlement** allowing merchants to settle received bitcoin in USDC or USDT on many different chains.
+
 ## [0.1.0] - 2026-07-14
 
 Initial public release of **Boltz.Arkade** — a new BTCPay Server plugin from [Boltz Exchange](https://boltz.exchange).
