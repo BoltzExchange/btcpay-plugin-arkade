@@ -15,6 +15,38 @@
 }
 
 <div class="row g-3 mt-1" data-stablecoin-wallet>
+    <div class="col-md-6">
+        <label for="@(Model.InputPrefix + UsdSettlementData.AssetKey)" class="form-label">Asset</label>
+        <select id="@(Model.InputPrefix + UsdSettlementData.AssetKey)"
+                name="@assetField"
+                class="form-select"
+                data-stablecoin-asset
+                data-testid="stablecoin-settlement-asset-select">
+            @foreach (var asset in UsdSettlementData.Assets)
+            {
+                <option value="@asset" selected="@(asset == assetValue ? "selected" : null)">@asset</option>
+            }
+        </select>
+        @Html.ValidationMessage(assetField, null, new { @class = "text-danger" })
+    </div>
+    <div class="col-md-6">
+        <label for="@(Model.InputPrefix + UsdSettlementData.DestinationChainKey)" class="form-label">Network</label>
+        <select id="@(Model.InputPrefix + UsdSettlementData.DestinationChainKey)"
+                name="@chainField"
+                class="form-select"
+                data-stablecoin-chain
+                data-testid="stablecoin-settlement-chain-select">
+            <option value="" selected="@(string.IsNullOrEmpty(chainValue) ? "selected" : null)">Select network</option>
+            @foreach (var network in UsdSettlementData.DestinationNetworks)
+            {
+                <option value="@network.DisplayName"
+                        data-stablecoin-network="@network.InternalName"
+                        data-stablecoin-assets="@string.Join(" ", network.Assets)"
+                        selected="@(network.DisplayName == chainValue ? "selected" : null)">@network.DisplayName</option>
+            }
+        </select>
+        @Html.ValidationMessage(chainField, null, new { @class = "text-danger" })
+    </div>
     <div class="col-12">
         <label for="@(Model.InputPrefix + UsdSettlementData.DestinationAddressKey)" class="form-label">Destination wallet</label>
         <div class="input-group">
@@ -33,34 +65,6 @@
         <div class="form-text" data-wallet-connect-status aria-live="polite">
             Connecting fills the wallet address and network. You can also enter them manually.
         </div>
-    </div>
-    <div class="col-md-6">
-        <label for="@(Model.InputPrefix + UsdSettlementData.DestinationChainKey)" class="form-label">Network</label>
-        <select id="@(Model.InputPrefix + UsdSettlementData.DestinationChainKey)"
-                name="@chainField"
-                class="form-select"
-                data-stablecoin-chain
-                data-testid="stablecoin-settlement-chain-select">
-            <option value="" selected="@(string.IsNullOrEmpty(chainValue) ? "selected" : null)">Select network</option>
-            @foreach (var chain in UsdSettlementData.DestinationChains)
-            {
-                <option value="@chain" selected="@(chain == chainValue ? "selected" : null)">@chain</option>
-            }
-        </select>
-        @Html.ValidationMessage(chainField, null, new { @class = "text-danger" })
-    </div>
-    <div class="col-md-6">
-        <label for="@(Model.InputPrefix + UsdSettlementData.AssetKey)" class="form-label">Asset</label>
-        <select id="@(Model.InputPrefix + UsdSettlementData.AssetKey)"
-                name="@assetField"
-                class="form-select"
-                data-testid="stablecoin-settlement-asset-select">
-            @foreach (var asset in UsdSettlementData.Assets)
-            {
-                <option value="@asset" selected="@(asset == assetValue ? "selected" : null)">@asset</option>
-            }
-        </select>
-        @Html.ValidationMessage(assetField, null, new { @class = "text-danger" })
     </div>
     <div class="col-12">
         <label for="@(Model.InputPrefix + UsdSettlementData.ThresholdKey)" class="form-label">Settlement threshold</label>

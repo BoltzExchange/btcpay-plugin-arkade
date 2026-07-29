@@ -90,11 +90,23 @@ public static class UsdSettlementConfiguration
                 "A destination chain is required for stablecoin settlement.");
         }
 
-        if (!UsdSettlementData.DestinationChains.Contains(destinationChain.Trim(), StringComparer.Ordinal))
+        var asset = Read(input, UsdSettlementData.AssetKey);
+        if (!TryCanonicalizeAsset(asset, out var canonicalAsset))
+        {
+            return Invalid(
+                UsdSettlementData.AssetKey,
+                $"Settlement asset must be one of {string.Join(", ", UsdSettlementData.Assets)}.");
+        }
+
+        var supportedNetworks = UsdSettlementData.GetDestinationNetworks(canonicalAsset);
+        var destinationNetwork = supportedNetworks.FirstOrDefault(
+            network => network.DisplayName.Equals(destinationChain.Trim(), StringComparison.Ordinal));
+        if (destinationNetwork is null)
         {
             return Invalid(
                 UsdSettlementData.DestinationChainKey,
-                $"Destination chain must be one of {string.Join(", ", UsdSettlementData.DestinationChains)}.");
+                $"{canonicalAsset} destination chain must be one of " +
+                $"{string.Join(", ", supportedNetworks.Select(network => network.DisplayName))}.");
         }
 
         var destinationAddress = Read(input, UsdSettlementData.DestinationAddressKey);
@@ -105,18 +117,10 @@ public static class UsdSettlementConfiguration
                 "A destination address is required for stablecoin settlement.");
         }
 
-        var asset = Read(input, UsdSettlementData.AssetKey);
-        if (!TryCanonicalizeAsset(asset, out var canonicalAsset))
-        {
-            return Invalid(
-                UsdSettlementData.AssetKey,
-                $"Settlement asset must be one of {string.Join(", ", UsdSettlementData.Assets)}.");
-        }
-
         return new UsdSettlementConfigResult(
             new UsdSettlementConfig(
                 thresholdSats,
-                destinationChain.Trim(),
+                destinationNetwork.DisplayName,
                 destinationAddress.Trim(),
                 canonicalAsset));
     }
