@@ -5,6 +5,7 @@ using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Extensions;
 using NArk.Abstractions.Intents;
 using NArk.Abstractions.VTXOs;
+using NArk.Abstractions.Wallets;
 using NArk.Core.Contracts;
 using NArk.Core.Services;
 using NArk.Core.Transport;
@@ -20,12 +21,57 @@ public class ArkadeWalletService(
     ISpendingService arkadeSpender,
     IBitcoinBlockchain bitcoinTimeChainProvider,
     IClientTransport clientTransport,
+    IContractService contractService,
     IVtxoStorage vtxoStorage,
     IIntentStorage intentStorage,
     IContractStorage contractStorage,
     VtxoSynchronizationService vtxoSyncService,
     BoardingUtxoSyncService boardingUtxoSyncService)
 {
+    /// <summary>
+    /// Return the wallet's active manual receive addresses, deriving only the address
+    /// types that are currently missing.
+    /// </summary>
+    public async Task<ArkReceiveViewModel> GetOrCreateManualReceiveAddresses(
+        string walletId,
+        CancellationToken cancellationToken)
+    {
+        var model = new ArkReceiveViewModel
+        {
+            Address = await FindManualReceiveAddress(walletId, cancellationToken),
+            BoardingAddress = await FindManualBoardingAddress(walletId, cancellationToken)
+        };
+
+        if (model.Address != null && model.BoardingAddress != null)
+            return model;
+
+        var terms = await clientTransport.GetServerInfoAsync(cancellationToken);
+
+        if (model.Address == null)
+        {
+            var contract = await contractService.DeriveContract(
+                walletId,
+                NextContractPurpose.Receive,
+                ContractActivityState.AwaitingFundsBeforeDeactivate,
+                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
+                cancellationToken: cancellationToken);
+            model.Address = contract.GetArkAddress().ToString(terms.Network.ChainName == ChainName.Mainnet);
+        }
+
+        if (model.BoardingAddress == null)
+        {
+            var contract = (ArkBoardingContract)await contractService.DeriveContract(
+                walletId,
+                NextContractPurpose.Boarding,
+                ContractActivityState.AwaitingFundsBeforeDeactivate,
+                metadata: new Dictionary<string, string> { ["Source"] = "manual" },
+                cancellationToken: cancellationToken);
+            model.BoardingAddress = contract.GetOnchainAddress(terms.Network).ToString();
+        }
+
+        return model;
+    }
+
     /// <summary>
     /// Compute the wallet's balance breakdown (available/locked/recoverable/unspendable/boarding),
     /// all in satoshis.
