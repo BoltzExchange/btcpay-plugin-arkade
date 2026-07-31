@@ -16,6 +16,7 @@
         <NativeLibraryFileName>libboltz_client_bindings.so</NativeLibraryFileName>
         <NativeLibraryPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/target/debug/$(NativeLibraryFileName)</NativeLibraryPath>
         <NativeRuntimeAssetsPath>$(MSBuildProjectDirectory)/../BoltzClientBindings/artifacts/runtimes</NativeRuntimeAssetsPath>
+        <PluginBuildImage />
         <ClientRoot>$(MSBuildProjectDirectory)/..</ClientRoot>
         <ClientBundle>$(MSBuildProjectDirectory)/Resources/js/stablecoin-wallet.js</ClientBundle>
     </PropertyGroup>
@@ -41,6 +42,12 @@
         <Exec Command="cargo build --locked --manifest-path &quot;$(MSBuildProjectDirectory)/../BoltzClientBindings/Cargo.toml&quot;" />
         <Error Condition="!Exists('$(NativeLibraryPath)')"
                Text="Native Boltz client build succeeded without producing $(NativeLibraryPath)." />
+    </Target>
+
+    <Target Name="BuildNativeBoltzClientRuntimes"
+            BeforeTargets="PrepareForBuild"
+            Condition="'$(Configuration)' == 'Release' and (!Exists('$(NativeRuntimeAssetsPath)/linux-x64/native/$(NativeLibraryFileName)') or !Exists('$(NativeRuntimeAssetsPath)/linux-arm64/native/$(NativeLibraryFileName)'))">
+        <Exec WorkingDirectory="$(ClientRoot)" Command="make native-runtimes" />
     </Target>
 
     <Target Name="ValidateSharedNativeLibraries"
@@ -79,9 +86,14 @@
                  Link="$(NativeLibraryFileName)"
                  CopyToOutputDirectory="PreserveNewest"
                  CopyToPublishDirectory="PreserveNewest" />
-        <Content Include="$(NativeRuntimeAssetsPath)/**/$(NativeLibraryFileName)"
+        <Content Include="$(NativeRuntimeAssetsPath)/linux-x64/native/$(NativeLibraryFileName)"
                  Condition="'$(Configuration)' == 'Release'"
-                 Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)"
+                 Link="runtimes/linux-x64/native/$(NativeLibraryFileName)"
+                 CopyToOutputDirectory="PreserveNewest"
+                 CopyToPublishDirectory="PreserveNewest" />
+        <Content Include="$(NativeRuntimeAssetsPath)/linux-arm64/native/$(NativeLibraryFileName)"
+                 Condition="'$(Configuration)' == 'Release'"
+                 Link="runtimes/linux-arm64/native/$(NativeLibraryFileName)"
                  CopyToOutputDirectory="PreserveNewest"
                  CopyToPublishDirectory="PreserveNewest" />
         <!-- BTCPayServer -->

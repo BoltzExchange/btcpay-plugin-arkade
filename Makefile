@@ -1,11 +1,15 @@
 PLUGIN := BTCPayServer.Plugins.Boltz.Arkade
+PLUGIN_PROJECT := $(PLUGIN)/$(PLUGIN).csproj
 PLUGIN_PACKER := submodules/btcpayserver/BTCPayServer.PluginPacker/BTCPayServer.PluginPacker.csproj
 BINDINGS := BoltzClientBindings
 RUST_VERSION := $(shell sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
 X64_RUST_TARGET := x86_64-unknown-linux-gnu
 ARM64_RUST_TARGET := aarch64-unknown-linux-gnu
-VERSION := $(shell sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' $(PLUGIN)/$(PLUGIN).csproj)
+VERSION := $(shell sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' $(PLUGIN_PROJECT))
 RELEASE_PATH := ./release/$(PLUGIN)/$(VERSION)
+PLUGIN_BUILDER_REPOSITORY ?= docker.io/boltz/btcpay-arkade-builder
+PLUGIN_BUILDER_TAG ?= v1
+PLUGIN_BUILDER_BASE_IMAGE ?= plugin-builder
 
 setup:
 	git submodule update --init --recursive
@@ -112,6 +116,28 @@ release-docker: clean
 		--output type=local,dest=./release \
 		.
 
+# Builds and pushes the custom build environment, then pins the registry digest
+# in the plugin project. Commit the resulting csproj change with the image update.
+push-plugin-builder-image:
+	@command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
+	@metadata="$$(mktemp)"; \
+	trap 'rm -f "$$metadata"' EXIT; \
+	docker buildx build \
+		--file Dockerfile.release \
+		--build-arg RUST_VERSION=$(RUST_VERSION) \
+		--build-arg PLUGIN_BUILDER_IMAGE=$(PLUGIN_BUILDER_BASE_IMAGE) \
+		--platform linux/amd64 \
+		--target plugin-builder \
+		--tag $(PLUGIN_BUILDER_REPOSITORY):$(PLUGIN_BUILDER_TAG) \
+		--push \
+		--metadata-file "$$metadata" \
+		.; \
+	digest="$$(jq -er '."containerimage.digest" | select(startswith("sha256:"))' "$$metadata")"; \
+	image="$(PLUGIN_BUILDER_REPOSITORY)@$$digest"; \
+	sed -i -E "s#<PluginBuildImage( */>|>[^<]*</PluginBuildImage>)#<PluginBuildImage>$$image</PluginBuildImage>#" $(PLUGIN_PROJECT); \
+	grep -F "<PluginBuildImage>$$image</PluginBuildImage>" $(PLUGIN_PROJECT) >/dev/null; \
+	echo "Pinned $$image in $(PLUGIN_PROJECT)"
+
 # Commits ALL pending tracked changes as the version-bump commit.
 gh-release: release-docker
 	@! git rev-parse -q --verify refs/tags/v$(VERSION) >/dev/null || { echo "tag v$(VERSION) already exists"; exit 1; }
@@ -125,4 +151,4 @@ gh-release: release-docker
 clean:
 	rm -rf ./publish ./release
 
-.PHONY: setup appsettings build native-runtimes validate-bindings run dev regtest regtest-stop regtest-clean test migration bump-version release release-docker gh-release clean
+.PHONY: setup appsettings build native-runtimes validate-bindings run dev regtest regtest-stop regtest-clean test migration bump-version release release-docker push-plugin-builder-image gh-release clean
